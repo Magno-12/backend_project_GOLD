@@ -91,10 +91,6 @@ pytest
 - Los esquemas de validación están en `app/schemas/`.
 - La lógica de negocio se implementa en `app/services/`.
 
-## Contribuciones
-
-Las contribuciones son bienvenidas. Por favor, abre un issue para discutir cambios mayores antes de crear un pull request.
-
 ## Licencia
 
 [MIT License](LICENSE)
