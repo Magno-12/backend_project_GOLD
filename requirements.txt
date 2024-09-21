@@ -1,91 +1,91 @@
 # Web Framework
-fastapi==0.95.2
-uvicorn[standard]==0.22.0
+fastapi
+uvicorn[standard]
 
 # Database
-sqlalchemy==2.0.15
-alembic==1.11.1
-psycopg2-binary==2.9.6  # Para PostgreSQL
-asyncpg==0.27.0  # Para PostgreSQL async
+sqlalchemy
+alembic
+psycopg2-binary  # Para PostgreSQL
+asyncpg  # Para PostgreSQL async
 
 # Authentication
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
+python-jose[cryptography]
+passlib[bcrypt]
 
 # Environment variables
-python-dotenv==1.0.0
+python-dotenv
 
 # API Client
-httpx==0.24.1
+httpx
 
 # AWS
-boto3==1.26.142
-aws-lambda-powertools==2.19.0
+boto3
+aws-lambda-powertools
 
 # Validation
-pydantic[email]==1.10.8
+pydantic[email]
 
 # Caching
-redis==4.5.5
+redis
 
 # Background Tasks
-celery==5.3.0
+celery
 
 # Testing
-pytest==7.3.1
-pytest-asyncio==0.21.0
-pytest-cov==4.1.0
+pytest
+pytest-asyncio
+pytest-cov
 
 # Linting and Formatting
-black==23.3.0
-flake8==6.0.0
-isort==5.12.0
+black
+flake8
+isort
 
 # Documentation
-mkdocs==1.4.3
-mkdocs-material==9.1.15
+mkdocs
+mkdocs-material
 
 # Monitoring and Logging
-sentry-sdk==1.25.1
-python-json-logger==2.0.7
+sentry-sdk
+python-json-logger
 
 # Security
-python-multipart==0.0.6  # Para manejo de formularios/archivos
-itsdangerous==2.1.2  # Para firmar datos
+python-multipart  # Para manejo de formularios/archivos
+itsdangerous  # Para firmar datos
 
 # Serialization
-orjson==3.9.0  # JSON más rápido
-msgpack==1.0.5  # Alternativa a JSON
+orjson  # JSON más rápido
+msgpack  # Alternativa a JSON
 
 # Date handling
-python-dateutil==2.8.2
+python-dateutil
 
 # Async support
-aiofiles==23.1.0
+aiofiles
 
 # Performance
-ujson==5.7.0
+ujson
 
 # Dependency Injection
-dependency-injector==4.41.0
+dependency-injector
 
 # GraphQL (opcional)
-strawberry-graphql==0.183.5
+strawberry-graphql
 
 # Websockets
-websockets==11.0.3
+websockets
 
 # Task Queue
-arq==0.25.0  # Redis task queue
+arq  # Redis task queue
 
 # Rate Limiting
-slowapi==0.1.8
+slowapi
 
 # Feature Flags
-launchdarkly-server-sdk==8.1.1
+launchdarkly-server-sdk
 
 # Metrics
-prometheus-client==0.17.0
+prometheus-client
 
 # Development Tools
-ipython==8.14.0
+ipython
