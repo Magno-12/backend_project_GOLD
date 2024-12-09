@@ -731,3 +731,216 @@ Fecha: Cualquier fecha futura
     ]
 }
 ```
+
+## 6. Manejo de Errores
+
+### 6.1 Estructura de Errores
+Todos los errores siguen esta estructura:
+```json
+{
+    "error": {
+        "code": "ERROR_CODE",
+        "message": "Mensaje descriptivo del error",
+        "details": {}, // Detalles adicionales específicos del error
+        "field": "campo_con_error" // Solo en errores de validación
+    }
+}
+```
+
+### 6.2 Códigos de Estado HTTP
+- `200 OK`: Solicitud exitosa
+- `201 Created`: Recurso creado exitosamente
+- `400 Bad Request`: Error en la solicitud
+- `401 Unauthorized`: Token inválido o expirado
+- `403 Forbidden`: Sin permisos para el recurso
+- `404 Not Found`: Recurso no encontrado
+- `409 Conflict`: Conflicto con el estado actual
+- `422 Unprocessable Entity`: Error de validación
+- `500 Internal Server Error`: Error del servidor
+
+### 6.3 Códigos de Error Específicos
+
+#### 6.3.1 Errores de Autenticación
+```json
+{
+    "error": {
+        "code": "INVALID_CREDENTIALS",
+        "message": "Credenciales inválidas"
+    }
+}
+
+{
+    "error": {
+        "code": "TOKEN_EXPIRED",
+        "message": "Token expirado",
+        "details": {
+            "expired_at": "2024-12-09T10:00:00Z"
+        }
+    }
+}
+```
+
+#### 6.3.2 Errores de Apuestas
+```json
+{
+    "error": {
+        "code": "LOTTERY_CLOSED",
+        "message": "Lotería cerrada para apuestas",
+        "details": {
+            "closes_at": "2024-12-14T20:00:00Z",
+            "current_time": "2024-12-14T20:30:00Z"
+        }
+    }
+}
+
+{
+    "error": {
+        "code": "INSUFFICIENT_BALANCE",
+        "message": "Saldo insuficiente",
+        "details": {
+            "current_balance": 3000,
+            "required_amount": 5000
+        }
+    }
+}
+```
+
+#### 6.3.3 Errores de Pago
+```json
+{
+    "error": {
+        "code": "PAYMENT_DECLINED",
+        "message": "Pago rechazado por el banco",
+        "details": {
+            "reason": "INSUFFICIENT_FUNDS",
+            "bank_message": "Fondos insuficientes"
+        }
+    }
+}
+```
+
+## 7. Webhooks
+
+### 7.1 Configuración
+Los webhooks deben configurarse en el panel de administración proporcionando una URL HTTPS válida.
+
+### 7.2 Eventos Disponibles
+
+#### 7.2.1 Transacciones
+```json
+{
+    "event": "transaction.updated",
+    "data": {
+        "transaction_id": "uuid",
+        "status": "APPROVED",
+        "created_at": "2024-12-09T10:00:00Z",
+        "amount": 50000,
+        "currency": "COP"
+    },
+    "sent_at": "2024-12-09T10:01:00Z"
+}
+```
+
+#### 7.2.2 Resultados de Lotería
+```json
+{
+    "event": "lottery.result",
+    "data": {
+        "lottery_id": "uuid",
+        "draw_date": "2024-12-14",
+        "winning_number": "1234",
+        "series": "123"
+    },
+    "sent_at": "2024-12-14T22:35:00Z"
+}
+```
+
+#### 7.2.3 Estado de Apuestas
+```json
+{
+    "event": "bet.status_updated",
+    "data": {
+        "bet_id": "uuid",
+        "status": "WON",
+        "prize_amount": 20000000,
+        "updated_at": "2024-12-14T22:40:00Z"
+    },
+    "sent_at": "2024-12-14T22:40:00Z"
+}
+```
+
+### 7.3 Seguridad de Webhooks
+- Cada webhook incluye una firma en el header `X-Wompi-Signature`
+- La firma debe validarse usando la clave secreta proporcionada
+- Los eventos se reenvían en caso de fallo hasta 5 veces
+
+## 8. Buenas Prácticas
+
+### 8.1 Manejo de Tokens
+```javascript
+// Ejemplo de manejo de tokens en el cliente
+class TokenManager {
+    static async refreshTokenIfNeeded() {
+        const expiresAt = localStorage.getItem('tokenExpiresAt');
+        if (Date.now() >= expiresAt - 30000) { // 30 segundos antes
+            await this.refreshToken();
+        }
+    }
+
+    static async refreshToken() {
+        const refresh = localStorage.getItem('refreshToken');
+        const response = await api.post('/auth/token/refresh/', { refresh });
+        this.setTokens(response.data);
+    }
+}
+```
+
+### 8.2 Polling de Estado
+```javascript
+// Ejemplo de polling para estado de transacción
+async function checkTransactionStatus(transactionId) {
+    const maxAttempts = 20;
+    const interval = 3000;
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+        const response = await api.get(`/payments/transactions/${transactionId}/`);
+        if (response.data.status !== 'PENDING') {
+            return response.data;
+        }
+        await new Promise(resolve => setTimeout(resolve, interval));
+        attempts++;
+    }
+    throw new Error('Transaction timeout');
+}
+```
+
+### 8.3 Manejo de Errores en Cliente
+```javascript
+async function handleApiError(error) {
+    if (error.response) {
+        switch (error.response.status) {
+            case 401:
+                await TokenManager.refreshTokenIfNeeded();
+                // Reintentar solicitud
+                break;
+            case 403:
+                // Redirigir a login
+                break;
+            case 422:
+                // Mostrar errores de validación
+                const errors = error.response.data.error.details;
+                break;
+            default:
+                // Mostrar error genérico
+        }
+    }
+}
+```
+
+### 8.4 Validaciones Recomendadas
+- Validar formato de números antes de enviar
+- Verificar montos mínimos y máximos
+- Confirmar horarios de lotería
+- Validar saldo disponible
+- Verificar estado de transacciones anteriores
