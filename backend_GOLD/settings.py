@@ -212,3 +212,14 @@ CORS_ALLOW_METHODS = [
     'POST',
     'PUT',
 ]
+
+LOTTERY_API_URL = 'https://api-resultadosloterias.com/v1'
+LOTTERY_API_KEY = 'tu-api-key-aqui'
+
+# Wompi Settings
+WOMPI_PUBLIC_KEY = os.getenv('WOMPI_PUBLIC_KEY')
+WOMPI_PRIVATE_KEY = os.getenv('WOMPI_PRIVATE_KEY')
+WOMPI_EVENTS_KEY = os.getenv('WOMPI_EVENTS_KEY')
+
+# Site URL es la URL base de tu aplicación
+SITE_URL = os.getenv('SITE_URL', 'http://localhost:8000')
