@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.payments.models.transaction import Transaction, UserBalance
+from apps.payments.config import WOMPI_SETTINGS
 
 
 class CardTokenizationSerializer(serializers.Serializer):

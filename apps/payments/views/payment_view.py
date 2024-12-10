@@ -13,6 +13,8 @@ from ..serializers.payment_serializers import (
     CardTokenizationSerializer
 )
 from apps.payments.services.wompi_service import WompiService
+from apps.payments.config import WOMPI_SETTINGS
+
 
 class PaymentViewSet(GenericViewSet):
     """ViewSet para manejar pagos y transacciones"""
