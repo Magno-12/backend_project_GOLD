@@ -1,0 +1,364 @@
+{
+  "timestamp": "2024-12-10T17:15:40.556092",
+  "tests": [
+    {
+      "name": "User Registration",
+      "success": true,
+      "timestamp": "2024-12-10T17:15:43.265709",
+      "data": {
+        "status_code": 201,
+        "response": {
+          "id": "af39c6f5-0cf5-415c-aee7-09df9532dc66",
+          "email": "test_8ff54b2c@example.com",
+          "first_name": "Test",
+          "last_name": "User",
+          "identification": "CC02fa07c1",
+          "phone_number": "+573045e20a55",
+          "birth_date": "1990-01-01",
+          "document_front": null,
+          "document_back": null
+        }
+      }
+    },
+    {
+      "name": "User Login",
+      "success": true,
+      "timestamp": "2024-12-10T17:15:46.044873",
+      "data": {
+        "status_code": 200,
+        "response": {
+          "tokens": {
+            "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTczMzk1NTM0NiwiaWF0IjoxNzMzODY4OTQ2LCJqdGkiOiJhOTg0NzhhYTgwMmE0ZDUyYTYzODk4NTMyYmQ3MzA1NyIsInVzZXJfaWQiOiJhZjM5YzZmNS0wY2Y1LTQxNWMtYWVlNy0wOWRmOTUzMmRjNjYifQ.Nps4OMdFMkfEeAlRSNxlBpFz5ebn_VM5za_qIYVBFf4",
+            "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzMzODY5MDA2LCJpYXQiOjE3MzM4Njg5NDYsImp0aSI6IjEwZDc4MGZiMGJhNDRkZGM4YWNlMjExNjdjYTE0M2MxIiwidXNlcl9pZCI6ImFmMzljNmY1LTBjZjUtNDE1Yy1hZWU3LTA5ZGY5NTMyZGM2NiJ9.hlEIwzW8BuaVKOn5csTPXx9vEZArUfhRHA7lS4sdyJ0"
+          },
+          "user": {
+            "id": "af39c6f5-0cf5-415c-aee7-09df9532dc66",
+            "email": "test_8ff54b2c@example.com",
+            "first_name": "Test",
+            "last_name": "User",
+            "phone_number": "+573045e20a55",
+            "identification": "CC02fa07c1",
+            "birth_date": "1990-01-01"
+          }
+        }
+      }
+    },
+    {
+      "name": "Get Available Lotteries",
+      "success": true,
+      "timestamp": "2024-12-10T17:15:46.421069",
+      "data": {
+        "status_code": 200,
+        "response": [
+          {
+            "nombre_loteria": "Loter\u00eda de Cundinamarca",
+            "numero": "9481",
+            "numero_serie": "025",
+            "fecha": "2024-12-02",
+            "cuando_juega": "LUNES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda del Tolima",
+            "numero": "4090",
+            "numero_serie": "125",
+            "fecha": "2024-12-02",
+            "cuando_juega": "LUNES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda de la Cruz Roja",
+            "numero": "4517",
+            "numero_serie": "277",
+            "fecha": "2024-12-03",
+            "cuando_juega": "MARTES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda de Huila",
+            "numero": "7483",
+            "numero_serie": "066",
+            "fecha": "2024-12-03",
+            "cuando_juega": "MARTES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda del Meta",
+            "numero": "2401",
+            "numero_serie": "018",
+            "fecha": "2024-12-04",
+            "cuando_juega": "MI\u00c9RCOLES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda del Valle",
+            "numero": "5460",
+            "numero_serie": "091",
+            "fecha": "2024-12-04",
+            "cuando_juega": "MI\u00c9RCOLES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda de Manizales",
+            "numero": "6285",
+            "numero_serie": "113",
+            "fecha": "2024-12-04",
+            "cuando_juega": "MI\u00c9RCOLES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda de Bogot\u00e1",
+            "numero": "1262",
+            "numero_serie": "054",
+            "fecha": "2024-12-05",
+            "cuando_juega": "JUEVES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda del Quind\u00edo",
+            "numero": "8186",
+            "numero_serie": "053",
+            "fecha": "2024-12-05",
+            "cuando_juega": "JUEVES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda de Risaralda",
+            "numero": "5095",
+            "numero_serie": "160",
+            "fecha": "2024-12-06",
+            "cuando_juega": "VIERNES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda de Medell\u00edn",
+            "numero": "8901",
+            "numero_serie": "347",
+            "fecha": "2024-12-06",
+            "cuando_juega": "VIERNES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda de Santander",
+            "numero": "0286",
+            "numero_serie": "003",
+            "fecha": "2024-12-06",
+            "cuando_juega": "VIERNES"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda de Boyac\u00e1",
+            "numero": "6493",
+            "numero_serie": "336",
+            "fecha": "2024-12-07",
+            "cuando_juega": "S\u00c1BADOS"
+          },
+          {
+            "nombre_loteria": "Extra de Colombia",
+            "numero": "8742",
+            "numero_serie": "278",
+            "fecha": "2024-12-07",
+            "cuando_juega": "S\u00c1BADOS"
+          },
+          {
+            "nombre_loteria": "Loter\u00eda del Cauca",
+            "numero": "8785",
+            "numero_serie": "203",
+            "fecha": "2024-12-07",
+            "cuando_juega": "S\u00c1BADOS"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Card Tokenization",
+      "success": true,
+      "timestamp": "2024-12-10T17:15:48.180444",
+      "data": {
+        "status_code": 201,
+        "response": {
+          "status": "CREATED",
+          "data": {
+            "id": "tok_test_122219_987Ec4Dd9eFe4FeDb4f2E3ff7683BB07",
+            "created_at": "2024-12-10T22:15:50.345+00:00",
+            "brand": "VISA",
+            "name": "VISA-4242",
+            "last_four": "4242",
+            "bin": "424242",
+            "exp_year": "28",
+            "exp_month": "12",
+            "card_holder": "Test User",
+            "created_with_cvc": true,
+            "expires_at": "2025-06-08T22:15:49.000Z",
+            "validity_ends_at": "2024-12-12T22:15:50.345+00:00"
+          }
+        }
+      }
+    },
+    {
+      "name": "Create Payment Transaction",
+      "success": true,
+      "timestamp": "2024-12-10T17:15:49.523511",
+      "data": {
+        "status_code": 201,
+        "response": {
+          "data": {
+            "id": "1122219-1733868951-93089",
+            "created_at": "2024-12-10T22:15:51.752Z",
+            "finalized_at": null,
+            "amount_in_cents": 5000000,
+            "reference": "TEST-d600fc0d",
+            "customer_email": "test_8ff54b2c@example.com",
+            "currency": "COP",
+            "payment_method_type": "CARD",
+            "payment_method": {
+              "type": "CARD",
+              "extra": {
+                "bin": "424242",
+                "name": "VISA-4242",
+                "brand": "VISA",
+                "exp_year": "28",
+                "card_type": "CREDIT",
+                "exp_month": "12",
+                "last_four": "4242",
+                "card_holder": "Test User",
+                "is_three_ds": false,
+                "three_ds_auth_type": null
+              },
+              "installments": 1
+            },
+            "status": "PENDING",
+            "status_message": null,
+            "billing_data": null,
+            "shipping_address": null,
+            "redirect_url": null,
+            "payment_source_id": null,
+            "payment_link_id": null,
+            "customer_data": null,
+            "bill_id": null,
+            "taxes": [],
+            "tip_in_cents": null
+          },
+          "meta": {}
+        },
+        "request_data": {
+          "amount_in_cents": 5000000,
+          "currency": "COP",
+          "customer_email": "test_8ff54b2c@example.com",
+          "reference": "TEST-d600fc0d",
+          "payment_method": {
+            "type": "CARD",
+            "token": "tok_test_122219_987Ec4Dd9eFe4FeDb4f2E3ff7683BB07",
+            "installments": 1
+          },
+          "acceptance_token": "eyJhbGciOiJIUzI1NiJ9.eyJjb250cmFjdF9pZCI6MjA4LCJwZXJtYWxpbmsiOiJodHRwczovL3dvbXBpLmNvbS9hc3NldHMvZG93bmxvYWRibGUvcmVnbGFtZW50by1Vc3Vhcmlvcy1Db2xvbWJpYS5wZGYiLCJmaWxlX2hhc2giOiJkMWVkMDI3NjhlNDEzZWEyMzFmNzAwMjc0N2Y0N2FhOSIsImppdCI6IjE3MzM4Njg5NTAtMTY5NjYiLCJlbWFpbCI6IiIsImV4cCI6MTczMzg3MjU1MH0.4udh3xXW6rFt3plx3fRo9_lTG_I-0ncZ-YoQx1MoI3U",
+          "signature": "eb8ab1691cafbe6ca65ba8f7c458e80c2df5d5eda50e3ea97f5acae7ea286398",
+          "debug_info": {
+            "signature_components": {
+              "reference": "TEST-d600fc0d",
+              "amount": "5000000",
+              "currency": "COP",
+              "integrity_key": "HIDDEN"
+            },
+            "signature_string": "TEST-d600fc0d5000000COPINTEGRITY_KEY",
+            "final_hash": "eb8ab1691cafbe6ca65ba8f7c458e80c2df5d5eda50e3ea97f5acae7ea286398"
+          }
+        },
+        "debug_info": {
+          "signature_process": {
+            "components_order": [
+              "reference",
+              "amount",
+              "currency",
+              "integrity_key"
+            ],
+            "lengths": {
+              "integrity_string": 70,
+              "final_hash": 64,
+              "reference": 13
+            },
+            "validations": {
+              "hash_format": true,
+              "reference_format": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Verify Transaction",
+      "success": true,
+      "timestamp": "2024-12-10T17:15:49.829013",
+      "data": {
+        "status_code": 200,
+        "response": {
+          "data": {
+            "id": "1122219-1733868951-93089",
+            "created_at": "2024-12-10T22:15:51.752Z",
+            "finalized_at": null,
+            "amount_in_cents": 5000000,
+            "reference": "TEST-d600fc0d",
+            "customer_email": "test_8ff54b2c@example.com",
+            "currency": "COP",
+            "payment_method_type": "CARD",
+            "payment_method": {
+              "type": "CARD",
+              "extra": {
+                "bin": "424242",
+                "name": "VISA-4242",
+                "brand": "VISA",
+                "exp_year": "28",
+                "card_type": "CREDIT",
+                "exp_month": "12",
+                "last_four": "4242",
+                "card_holder": "Test User",
+                "is_three_ds": false,
+                "three_ds_auth_type": null
+              },
+              "installments": 1
+            },
+            "status": "PENDING",
+            "status_message": null,
+            "billing_data": null,
+            "shipping_address": null,
+            "redirect_url": null,
+            "payment_source_id": null,
+            "payment_link_id": null,
+            "customer_data": null,
+            "bill_id": null,
+            "taxes": [],
+            "tip_in_cents": null,
+            "merchant": {
+              "id": 122219,
+              "name": "Magno  Stiven Martinez Bueno",
+              "legal_name": "Magno  Stiven Martinez Bueno",
+              "contact_name": "Magno  Stiven Martinez Bueno",
+              "phone_number": "+573135109123",
+              "logo_url": null,
+              "legal_id_type": "CC",
+              "email": "magno12.mcmb@gmail.com",
+              "legal_id": "1077475932",
+              "public_key": "pub_test_gm7Ldcm8Yjb7NDUcGb4qUtw8oc4amknZ"
+            },
+            "entries": [],
+            "disbursement": null,
+            "refunds": []
+          },
+          "meta": {}
+        }
+      }
+    },
+    {
+      "name": "Place Bet",
+      "success": true,
+      "timestamp": "2024-12-10T17:15:52.007893",
+      "data": {
+        "status_code": 201,
+        "response": {
+          "id": "5c2935f5-a545-4987-8a76-bdecb9989563",
+          "lottery_name": "Loter\u00eda de Cundinamarca",
+          "number": "1234",
+          "series": "025",
+          "amount": "5000.00",
+          "draw_date": "2024-12-02",
+          "status": "PENDING",
+          "created_at": "2024-12-10T17:15:51.944367-05:00",
+          "result": null
+        }
+      }
+    }
+  ],
+  "summary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0
+  }
+}

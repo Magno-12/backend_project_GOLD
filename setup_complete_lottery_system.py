@@ -1,4 +1,10 @@
 import os
+import django
+
+# Configure Django settings before any imports
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend_GOLD.settings')
+django.setup()
+
 from decimal import Decimal
 from datetime import datetime, time
 

@@ -213,8 +213,8 @@ CORS_ALLOW_METHODS = [
     'PUT',
 ]
 
-LOTTERY_API_URL = 'https://api-resultadosloterias.com/v1'
-LOTTERY_API_KEY = 'tu-api-key-aqui'
+LOTTERY_API_URL = 'https://lottery-results-api.onrender.com/results'
+LOTTERY_API_KEY = '47SFw0COzXcwePfecOUwWUXe9BrZhg'
 
 # Wompi Settings
 WOMPI_PUBLIC_KEY = os.getenv('WOMPI_PUBLIC_KEY')

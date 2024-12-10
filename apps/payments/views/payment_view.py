@@ -4,10 +4,11 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
+from django.db import transaction
 import uuid
 
-from ..models.transaction import Transaction, UserBalance
-from ..serializers.payment_serializers import (
+from apps.payments.models.transaction import Transaction, UserBalance
+from apps.payments.serializers.payment_serializers import (
     TransactionSerializer,
     UserBalanceSerializer,
     CardTokenizationSerializer
@@ -51,15 +52,27 @@ class PaymentViewSet(GenericViewSet):
         serializer.is_valid(raise_exception=True)
 
         # Generar referencia única
-        reference = f"REF-{uuid.uuid4().hex[:8]}"
+        reference = f"TEST-{uuid.uuid4().hex[:8]}"
 
+        # Preparar datos para Wompi
         transaction_data = {
             'amount_in_cents': int(serializer.validated_data['amount'] * 100),
             'currency': WOMPI_SETTINGS['CURRENCY'],
-            'reference': reference,
-            'payment_method': serializer.validated_data['payment_method'],
-            'redirect_url': WOMPI_SETTINGS['REDIRECT_URL']
+            'customer_email': request.user.email,
+            'reference': reference
         }
+
+        # Configurar método de pago
+        if serializer.validated_data['payment_method'] == 'CARD':
+            transaction_data['payment_method'] = {
+                'type': 'CARD',
+                'token': serializer.validated_data.get('card_token'),
+                'installments': serializer.validated_data.get('installments', 1)
+            }
+
+        # Agregar acceptance token si viene
+        if serializer.validated_data.get('acceptance_token'):
+            transaction_data['acceptance_token'] = serializer.validated_data['acceptance_token']
 
         response = self.wompi_service.create_transaction(transaction_data)
         if not response.get('data', {}).get('id'):
@@ -68,7 +81,7 @@ class PaymentViewSet(GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Guardar transacción
+        # Crear transacción
         transaction = Transaction.objects.create(
             user=request.user,
             amount=serializer.validated_data['amount'],
@@ -101,15 +114,36 @@ class PaymentViewSet(GenericViewSet):
         
         response = self.wompi_service.get_transaction(transaction.wompi_id)
         if response.get('data'):
-            transaction.status = response['data']['status']
-            transaction.status_detail = response['data']
-            transaction.save()
+            with transaction.atomic():
+                transaction.status = response['data']['status']
+                transaction.status_detail = response['data']
+                transaction.save()
 
-            # Actualizar saldo si la transacción fue exitosa
-            if transaction.status == 'APPROVED':
-                balance, _ = UserBalance.objects.get_or_create(user=request.user)
-                balance.balance += transaction.amount
-                balance.last_transaction = transaction
-                balance.save()
+                # Actualizar saldo si la transacción fue exitosa
+                if transaction.status == 'APPROVED':
+                    balance, _ = UserBalance.objects.get_or_create(user=request.user)
+                    balance.balance += transaction.amount
+                    balance.last_transaction = transaction
+                    balance.save()
 
         return Response(TransactionSerializer(transaction).data)
+
+    @action(detail=False, methods=['get'])
+    def winnings_summary(self, request):
+        """Obtener resumen de ganancias del usuario"""
+        balance, _ = UserBalance.objects.get_or_create(user=request.user)
+        winning_transactions = Transaction.objects.filter(
+            user=request.user,
+            payment_method='PRIZE',
+            status='COMPLETED'
+        )
+
+        total_winnings = sum(t.amount for t in winning_transactions)
+        recent_wins = winning_transactions.order_by('-created_at')[:5]
+
+        return Response({
+            'current_balance': str(balance.balance),
+            'total_winnings': str(total_winnings),
+            'winning_count': winning_transactions.count(),
+            'recent_wins': TransactionSerializer(recent_wins, many=True).data
+        })

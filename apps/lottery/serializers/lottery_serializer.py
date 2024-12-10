@@ -1,10 +1,13 @@
 from rest_framework import serializers
+
 from apps.lottery.models import LotteryResult, Lottery, Bet
+
 
 class PremioSecoSerializer(serializers.Serializer):
     premio = serializers.CharField()
     numero = serializers.CharField()
     serie = serializers.CharField()
+
 
 class LotteryResultSerializer(serializers.ModelSerializer):
     lottery_name = serializers.CharField(source='lottery.name')
@@ -22,7 +25,9 @@ class LotteryResultSerializer(serializers.ModelSerializer):
             'created_at'
         ]
 
+
 class BetSerializer(serializers.ModelSerializer):
+    lottery = serializers.CharField(write_only=True)  # Cambio aquí
     lottery_name = serializers.CharField(source='lottery.name', read_only=True)
     result = serializers.SerializerMethodField()
 
@@ -40,7 +45,14 @@ class BetSerializer(serializers.ModelSerializer):
             'created_at',
             'result'
         ]
-        read_only_fields = ['status']
+        read_only_fields = ['status', 'lottery_name']
+
+    def validate_lottery(self, value):  # Nuevo método
+        """Valida y obtiene la lotería por nombre"""
+        try:
+            return Lottery.objects.get(name=value)
+        except Lottery.DoesNotExist:
+            raise serializers.ValidationError(f"Lotería '{value}' no encontrada")
 
     def get_result(self, obj):
         """Obtiene el resultado de la lotería si existe"""
@@ -55,14 +67,16 @@ class BetSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         """Validaciones de la apuesta"""
-        if data['amount'] < data['lottery'].min_bet_amount:
+        lottery = data['lottery']  # Ahora lottery ya es una instancia de Lottery
+        
+        if data['amount'] < lottery.min_bet_amount:
             raise serializers.ValidationError(
-                f"La apuesta mínima es {data['lottery'].min_bet_amount}"
+                f"La apuesta mínima es {lottery.min_bet_amount}"
             )
         
-        if data['amount'] > data['lottery'].max_bet_amount:
+        if data['amount'] > lottery.max_bet_amount:
             raise serializers.ValidationError(
-                f"La apuesta máxima es {data['lottery'].max_bet_amount}"
+                f"La apuesta máxima es {lottery.max_bet_amount}"
             )
 
         if not data.get('number', '').isdigit() or len(data.get('number', '')) != 4:
