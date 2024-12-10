@@ -24,7 +24,7 @@ class Lottery(BaseModel):
     fraction_count = models.PositiveIntegerField('Cantidad de fracciones')
     fraction_price = models.DecimalField(
         'Precio fracción',
-        max_digits=10,
+        max_digits=20,
         decimal_places=2
     )
     major_prize_amount = models.DecimalField(
@@ -34,13 +34,13 @@ class Lottery(BaseModel):
     )
     min_bet_amount = models.DecimalField(
         'Apuesta mínima',
-        max_digits=10,
+        max_digits=20,
         decimal_places=2,
         validators=[MinValueValidator(0)]
     )
     max_bet_amount = models.DecimalField(
         'Apuesta máxima',
-        max_digits=10,
+        max_digits=20,
         decimal_places=2,
         validators=[MinValueValidator(0)]
     )
