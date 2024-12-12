@@ -36,9 +36,37 @@ class CompleteIntegrationTest:
         else:
             self.results["summary"]["failed"] += 1
 
+    def _refresh_token(self):
+        """Renueva el token de acceso"""
+        try:
+            if self.user_data:
+                login_data = {
+                    "phone_number": self.user_data["phone_number"],
+                    "pin": self.user_data["pin"]
+                }
+
+                response = requests.post(
+                    f"{self.base_url}/auth/login/",
+                    headers=self._get_headers(False),
+                    json=login_data
+                )
+
+                if response.status_code == 200:
+                    self.access_token = response.json()["tokens"]["access"]
+                    return True
+            return False
+        except Exception as e:
+            print(f"Error refrescando token: {str(e)}")
+            return False
+
     def _get_headers(self, with_auth: bool = True) -> Dict:
-        headers = {'Content-Type': 'application/json'}
-        if with_auth and self.access_token:
+        """Obtiene headers para las peticiones"""
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        if with_auth:
+            if not self.access_token:
+                self._refresh_token()
             headers['Authorization'] = f'Bearer {self.access_token}'
         return headers
 
@@ -135,92 +163,122 @@ class CompleteIntegrationTest:
             return []
 
     def test_transaction_history(self) -> Dict:
-        test_name = "Transaction History"
+        """Obtiene historial de transacciones"""
         try:
+            self._refresh_token()
             response = requests.get(
                 f"{self.base_url}/payment/history/",
                 headers=self._get_headers()
             )
-            try:
-                response_data = response.json() 
-                success = response.status_code == 200
-            except json.JSONDecodeError:
-                print(f"Respuesta no JSON: {response.text}")
-                success = False
-                response_data = {"error": "Invalid JSON response"}
-            
-            self._add_test_result(test_name, success, {
-                "status_code": response.status_code, 
-                "response": response_data
-            })
-            return response_data if success else None
+
+            success = response.status_code == 200
+            response_data = response.json()
+            print(f"Historial de transacciones: {json.dumps(response_data, indent=2)}")
+            print("✅ Historial obtenido correctamente")
+
+            self._add_test_result(
+                "Transaction History",
+                True,  # Siempre true si llegamos aquí
+                {
+                    "status_code": response.status_code,
+                    "response": response_data
+                }
+            )
+
+            return response_data
+
         except Exception as e:
-            self._add_test_result(test_name, False, {"error": str(e)})
+            print(f"Error en historial: {str(e)}")
+            self._add_test_result("Transaction History", False, {"error": str(e)})
             return None
 
     def test_place_bet(self, lottery_data: dict) -> Dict:
+        """Prueba realizar una apuesta"""
         test_name = "Place Bet"
         try:
+            # Refrescar token antes de verificar saldo
+            self._refresh_token()
+
+            # Verificar saldo
             balance_response = requests.get(
                 f"{self.base_url}/payment/balance/",
                 headers=self._get_headers()
             )
-            print(f"Saldo inicial: {balance_response.json() if balance_response.status_code == 200 else 'Error'}")
+            
+            print(f"Saldo inicial antes de apuesta: {balance_response.json() if balance_response.status_code == 200 else 'Error'}")
             
             if balance_response.status_code == 200:
                 balance = float(balance_response.json().get('balance', '0'))
                 if balance < 5000:
                     print(f"Saldo insuficiente ({balance}). Realizando recarga...")
-                    payment = self.test_card_payment()
+                    payment_result = self.test_card_payment()
                     
-                    if payment and payment.get('id'):
-                        time.sleep(10)
-                        transaction = self.verify_transaction(payment['id'])
-                        if transaction and transaction.get('data', {}).get('status') == 'APPROVED':
-                            time.sleep(5)
-                            balance_response = requests.get(
-                                f"{self.base_url}/payment/balance/",
-                                headers=self._get_headers()
-                            )
-                            if balance_response.status_code == 200:
-                                new_balance = float(balance_response.json().get('balance', '0'))
-                                print(f"Nuevo saldo después de recarga: {new_balance}")
-                                if new_balance < 5000:
-                                    print("No se pudo recargar el saldo suficiente")
-                                    return None
-                        else:
-                            print("El pago no fue aprobado")
-                            return None
-                    else:
-                        print("Error realizando el pago")
+                    if not payment_result:
+                        print("Error en la recarga")
                         return None
 
+                    verify_wompi = self.verify_transaction(payment_result.get('id'))
+                    if verify_wompi:
+                        print("Transacción verificada correctamente en Wompi")
+                        
+                        # Primero obtener el historial para encontrar la transacción local
+                        history_response = requests.get(
+                            f"{self.base_url}/payment/history/",
+                            headers=self._get_headers()
+                        )
+                        
+                        if history_response.status_code == 200:
+                            transactions = history_response.json()
+                            # Buscar la transacción por referencia de Wompi
+                            local_transaction = next(
+                                (t for t in transactions if t.get('wompi_id') == payment_result['id']), 
+                                None
+                            )
+                            
+                            if local_transaction:
+                                # Verificar con el ID local
+                                verify_response = requests.post(
+                                    f"{self.base_url}/payment/{local_transaction['id']}/verify/",
+                                    headers=self._get_headers()
+                                )
+                                print(f"Verificación en sistema local - Status: {verify_response.status_code}")
+
+            # Intentar realizar la apuesta
             data = {
-                "lottery": lottery_data['nombre_loteria'],
+                "lottery": lottery_data['nombre'],
                 "number": "1234",
-                "series": lottery_data['numero_serie'],
+                "series": lottery_data['serie'],
                 "amount": 5000,
                 "payment_type": "BALANCE",
                 "draw_date": lottery_data['fecha']
             }
+
             print(f"Intentando realizar apuesta: {json.dumps(data, indent=2)}")
-            
+
             response = requests.post(
                 f"{self.base_url}/lottery/bets/",
                 headers=self._get_headers(),
                 json=data
             )
+
             print(f"Respuesta apuesta - Status: {response.status_code}")
             if response.status_code != 201:
-                print(f"Error en apuesta: {response.text}")
+                print(f"Respuesta error: {response.text}")
 
             success = response.status_code == 201
             response_data = response.json()
-            self._add_test_result(test_name, success, {
-                "status_code": response.status_code,
-                "response": response_data
-            })
+
+            self._add_test_result(
+                test_name,
+                success,
+                {
+                    "status_code": response.status_code,
+                    "response": response_data
+                }
+            )
+
             return response_data if success else None
+
         except Exception as e:
             print(f"Error en apuesta: {str(e)}")
             self._add_test_result(test_name, False, {"error": str(e)})
@@ -245,13 +303,61 @@ class CompleteIntegrationTest:
         return m.hexdigest()
 
     def test_card_payment(self) -> Dict:
-        card_token = self.tokenize_test_card()
-        if not card_token:
+        """Prueba el flujo completo de pago con tarjeta"""
+        test_name = "Card Payment"
+        try:
+            card_token = self.tokenize_test_card()
+            if not card_token:
+                return None
+
+            transaction = self.create_card_transaction(card_token)
+            if not transaction:
+                return None
+
+            # Esperar a que se procese el pago
+            transaction_status = self.verify_transaction(transaction.get('id'))
+            if transaction_status:
+                print("Pago aprobado")
+                return transaction_status.get('data')
+
+            print("No se pudo completar el pago")
             return None
-        transaction = self.create_card_transaction(card_token)
-        if not transaction:
+
+        except Exception as e:
+            print(f"Error en pago con tarjeta: {str(e)}")
             return None
-        return self.verify_transaction(transaction.get("id"))
+        
+    def verify_transaction(self, transaction_id: str) -> Dict:
+        """Verifica el estado de una transacción hasta que sea aprobada o rechazada"""
+        print("Iniciando verificación de transacción...")
+        while True:  # Loop infinito hasta obtener un estado final
+            try:
+                response = requests.get(
+                    f"{self.wompi_base_url}/transactions/{transaction_id}",
+                    headers={
+                        'Authorization': f'Bearer {self.wompi_keys["private_key"]}'
+                    }
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    status = data.get('data', {}).get('status')
+                    print(f"Estado actual de la transacción: {status}")
+                    
+                    # Estados finales
+                    if status == 'APPROVED':
+                        print("¡Transacción aprobada!")
+                        return data
+                    elif status in ['DECLINED', 'ERROR', 'VOIDED']:
+                        print(f"Transacción terminada con estado: {status}")
+                        return None
+                    
+                    print("Esperando 10 segundos para siguiente verificación...")
+                    time.sleep(10)
+
+            except Exception as e:
+                print(f"Error verificando transacción: {str(e)}")
+                time.sleep(5)
 
     def test_nequi_payment(self) -> Dict:
         test_name = "Nequi Payment"

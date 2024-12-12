@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.core.exceptions import ValidationError
 import uuid
 from decimal import Decimal
 
@@ -111,23 +112,35 @@ class PaymentViewSet(GenericViewSet):
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
         """Verificar estado de una transacción"""
-        transaction = get_object_or_404(self.get_queryset(), pk=pk)
+        try:
+            # Primero intentar buscar por UUID
+            try:
+                transaction = get_object_or_404(self.get_queryset(), pk=pk)
+            except ValidationError:
+                # Si no es UUID, buscar por wompi_id
+                transaction = get_object_or_404(self.get_queryset(), wompi_id=pk)
+            
+            response = self.wompi_service.get_transaction(transaction.wompi_id)
+            if response.get('data'):
+                with transaction.atomic():
+                    transaction.status = response['data']['status']
+                    transaction.status_detail = response['data']
+                    transaction.save()
+
+                    # Actualizar saldo si la transacción fue exitosa
+                    if transaction.status == 'APPROVED':
+                        balance, _ = UserBalance.objects.get_or_create(user=request.user)
+                        balance.balance += transaction.amount
+                        balance.last_transaction = transaction
+                        balance.save()
+
+            return Response(TransactionSerializer(transaction).data)
         
-        response = self.wompi_service.get_transaction(transaction.wompi_id)
-        if response.get('data'):
-            with transaction.atomic():
-                transaction.status = response['data']['status']
-                transaction.status_detail = response['data']
-                transaction.save()
-
-                # Actualizar saldo si la transacción fue exitosa
-                if transaction.status == 'APPROVED':
-                    balance, _ = UserBalance.objects.get_or_create(user=request.user)
-                    balance.balance += transaction.amount
-                    balance.last_transaction = transaction
-                    balance.save()
-
-        return Response(TransactionSerializer(transaction).data)
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=False, methods=['get'])
     def winnings_summary(self, request):
@@ -195,6 +208,12 @@ class PaymentViewSet(GenericViewSet):
     @action(detail=False, methods=['get'])
     def history(self, request):
         """Obtener historial de transacciones"""
-        transactions = self.get_queryset().order_by('-created_at')
-        serializer = TransactionSerializer(transactions, many=True)
-        return Response(serializer.data)
+        try:
+            transactions = self.get_queryset().order_by('-created_at')
+            serializer = TransactionSerializer(transactions, many=True)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
