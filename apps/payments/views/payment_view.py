@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 import uuid
+from decimal import Decimal
 
 from apps.payments.models.transaction import Transaction, UserBalance
 from apps.payments.serializers.payment_serializers import (
@@ -147,3 +148,53 @@ class PaymentViewSet(GenericViewSet):
             'winning_count': winning_transactions.count(),
             'recent_wins': TransactionSerializer(recent_wins, many=True).data
         })
+
+    @action(detail=False, methods=['get'])
+    def balance(self, request):
+        """Obtener saldo del usuario"""
+        try:
+            balance, created = UserBalance.objects.get_or_create(
+                user=request.user,
+                defaults={'balance': Decimal('0')}
+            )
+
+            last_transaction = Transaction.objects.filter(
+                user=request.user,
+                status='COMPLETED'
+            ).order_by('-created_at').first()
+
+            response_data = {
+                'balance': str(balance.balance),
+                'last_transaction_date': last_transaction.created_at if last_transaction else None,
+                'transactions_summary': {
+                    'total_transactions': Transaction.objects.filter(
+                        user=request.user,
+                        status='COMPLETED'
+                    ).count(),
+                    'pending_transactions': Transaction.objects.filter(
+                        user=request.user,
+                        status='PENDING'
+                    ).count()
+                },
+                'last_transaction': {
+                    'id': str(last_transaction.id),
+                    'amount': str(last_transaction.amount),
+                    'type': last_transaction.payment_method,
+                    'reference': last_transaction.reference
+                } if last_transaction else None
+            }
+
+            return Response(response_data)
+            
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'])
+    def history(self, request):
+        """Obtener historial de transacciones"""
+        transactions = self.get_queryset().order_by('-created_at')
+        serializer = TransactionSerializer(transactions, many=True)
+        return Response(serializer.data)

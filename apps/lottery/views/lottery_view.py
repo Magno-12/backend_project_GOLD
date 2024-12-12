@@ -44,13 +44,13 @@ class LotteryResultViewSet(GenericViewSet):
 
         for result in results:
             try:
-                lottery = Lottery.objects.get(name=result['nombre_loteria'])
+                lottery = Lottery.objects.get(name=result['nombre'])
                 lottery_result, created = LotteryResult.objects.update_or_create(
                     lottery=lottery,
                     fecha=result['fecha'],
                     defaults={
                         'numero': result['numero'],
-                        'numero_serie': result['numero_serie'],
+                        'numero_serie': result['serie'],
                         'premios_secos': result.get('premios_secos', {})
                     }
                 )
@@ -61,7 +61,7 @@ class LotteryResultViewSet(GenericViewSet):
                     winner_service = LotteryWinnerService(lottery_result)
                     winner_service.process_results()
                     self._process_winners_payments(lottery_result)
-                    
+
                 processed_results.append({
                     'lottery': lottery.name,
                     'result': lottery_result,
