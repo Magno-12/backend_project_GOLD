@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.users.models import User
+from apps.payments.models import UserBalance
 
 
 class AuthenticationSerializer(serializers.Serializer):
@@ -13,6 +14,7 @@ class LogoutSerializer(serializers.Serializer):
 
 
 class UserAuthResponseSerializer(serializers.ModelSerializer):
+    balance = serializers.SerializerMethodField()
     class Meta:
         model = User
         fields = (
@@ -22,5 +24,18 @@ class UserAuthResponseSerializer(serializers.ModelSerializer):
             'last_name',
             'phone_number',
             'identification',
-            'birth_date'
+            'birth_date',
+            'balance'
         )
+
+    def get_balance(self, obj):
+            balance = UserBalance.objects.filter(user=obj).first()
+            if balance:
+                return {
+                    'amount': float(balance.balance),
+                    'last_updated': balance.last_transaction.created_at if balance.last_transaction else None
+                }
+            return {
+                'amount': 0,
+                'last_updated': None
+            }

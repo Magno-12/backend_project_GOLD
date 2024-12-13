@@ -4,8 +4,8 @@ from apps.lottery.models import LotteryResult, Lottery, Bet
 
 
 class PremioSecoSerializer(serializers.Serializer):
-    premio = serializers.CharField()
-    numero = serializers.CharField()
+    nombre = serializers.CharField()
+    resultado = serializers.CharField()
     serie = serializers.CharField()
 
 

@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -37,10 +38,14 @@ class UserViewSet(viewsets.GenericViewSet):
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @transaction.atomic
     def destroy(self, request, pk=None):
         """Eliminar un usuario"""
         try:
             user = self.get_queryset().get(pk=pk)
+            # Primero invalidar todos los tokens del usuario
+            OutstandingToken.objects.filter(user=user).delete()
+            # Luego desactivar el usuario
             user.is_active = False
             user.save()
             return Response(status=status.HTTP_204_NO_CONTENT)

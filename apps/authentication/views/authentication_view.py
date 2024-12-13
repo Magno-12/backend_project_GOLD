@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.viewsets import GenericViewSet
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.exceptions import AuthenticationFailed
@@ -23,7 +23,7 @@ class AuthenticationViewSet(GenericViewSet):
     ViewSet para manejar la autenticación de usuarios en el sistema de loterías.
     """
     authentication_classes = [JWTAuthentication]
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get_serializer_class(self):
         if self.action == 'login':
@@ -41,7 +41,7 @@ class AuthenticationViewSet(GenericViewSet):
             401: "Credenciales inválidas"
         }
     )
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
         """
         Maneja el inicio de sesión de usuarios y proporciona tokens JWT.
