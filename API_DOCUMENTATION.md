@@ -944,3 +944,154 @@ async function handleApiError(error) {
 - Confirmar horarios de lotería
 - Validar saldo disponible
 - Verificar estado de transacciones anteriores
+
+--------------------------------------------------------------------------- se cambiará luego
+### 2.3 Actualizar Perfil de Usuario
+
+**Endpoint:** `PATCH /api/users/{user_id}/update_profile/`
+
+**Descripción:** Permite al usuario actualizar parcialmente su información de perfil.
+
+**Headers:**
+```http
+Authorization: Bearer {access_token}
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+    "first_name": "Nuevo Nombre",
+    "last_name": "Nuevo Apellido",
+    "email": "nuevo@email.com",
+    "phone_number": "+573001234567",
+    "document_front": "base64...",
+    "document_back": "base64..."
+}
+```
+
+**Response Exitosa (200 OK):**
+```json
+{
+    "message": "Perfil actualizado correctamente",
+    "user": {
+        "id": "uuid",
+        "first_name": "Nuevo Nombre",
+        "last_name": "Nuevo Apellido",
+        "email": "nuevo@email.com",
+        "phone_number": "+573001234567",
+        "document_front": true,
+        "document_back": true
+    }
+}
+```
+
+### 2.4 Eliminar Cuenta
+
+**Endpoint:** `DELETE /api/users/{user_id}/`
+
+**Descripción:** Permite al usuario eliminar permanentemente su cuenta.
+
+**Headers:**
+```http
+Authorization: Bearer {access_token}
+```
+
+**Condiciones:**
+- Solo puede eliminar su propia cuenta
+- La eliminación es permanente e irreversible
+- Se eliminan todos los datos asociados
+
+**Response Exitosa (204 No Content)**
+
+**Error Response (403 Forbidden):**
+```json
+{
+    "error": "Solo puedes eliminar tu propia cuenta"
+}
+```
+
+### 3.4 Detalle de Premios Ganados
+
+**Endpoint:** `GET /api/lottery/user_prizes/`
+
+**Descripción:** Obtiene un detalle completo de todos los premios ganados por el usuario.
+
+**Headers:**
+```http
+Authorization: Bearer {access_token}
+```
+
+**Response Exitosa (200 OK):**
+```json
+{
+    "total_winning_bets": 2,
+    "total_won": "5100000.00",
+    "prizes": [
+        {
+            "bet_id": "uuid-apuesta",
+            "lottery": "Lotería de Boyacá",
+            "draw_date": "2024-12-14",
+            "number_played": "1234",
+            "series_played": "123",
+            "amount_bet": "5000.00",
+            "total_won": "5000000.00",
+            "winning_details": {
+                "winning_number": "1234",
+                "winning_series": "123",
+                "prizes": [
+                    {
+                        "type": "MAJOR",
+                        "name": "Premio Mayor",
+                        "amount": "5000000.00",
+                        "match_type": "Coincidencia Exacta",
+                        "details": {
+                            "number": "1234",
+                            "series": "123",
+                            "matched": "full"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "bet_id": "uuid-apuesta-2",
+            "lottery": "Lotería del Valle",
+            "draw_date": "2024-12-13",
+            "number_played": "5678",
+            "series_played": "456",
+            "amount_bet": "5000.00",
+            "total_won": "100000.00",
+            "winning_details": {
+                "winning_number": "5678",
+                "winning_series": "456",
+                "prizes": [
+                    {
+                        "type": "APPROX_SAME_SERIES",
+                        "name": "Tres Últimas",
+                        "amount": "100000.00",
+                        "match_type": "Tres Últimas",
+                        "details": {
+                            "matched_positions": [1, 2, 3],
+                            "series": "456"
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+}
+```
+
+**Posibles Errores:**
+```json
+// 401 Unauthorized - Token inválido o expirado
+{
+    "error": "Token inválido o expirado"
+}
+
+// 500 Internal Server Error
+{
+    "error": "Error interno del servidor"
+}
+```
