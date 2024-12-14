@@ -40,14 +40,17 @@ class UserViewSet(viewsets.GenericViewSet):
 
     @transaction.atomic
     def destroy(self, request, pk=None):
-        """Eliminar un usuario"""
+        """Eliminar usuario (solo puede eliminar su propia cuenta)"""
         try:
+            if str(request.user.id) != pk:
+                return Response(
+                    {"error": "Solo puedes eliminar tu propia cuenta"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
             user = self.get_queryset().get(pk=pk)
-            # Primero invalidar todos los tokens del usuario
-            OutstandingToken.objects.filter(user=user).delete()
-            # Luego desactivar el usuario
-            user.is_active = False
-            user.save()
+            user.delete()
+
             return Response(status=status.HTTP_204_NO_CONTENT)
         except User.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -130,6 +133,49 @@ class UserViewSet(viewsets.GenericViewSet):
             request.user.save()
             return Response({'message': 'PIN actualizado correctamente'})
         except ValidationError as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=True, methods=['patch'])
+    def update_profile(self, request, pk=None):
+        """Actualizar parcialmente el perfil del usuario. Solo permite actualizar el perfil propio."""
+        if str(request.user.id) != pk:
+            return Response(
+                {'error': 'No tienes permiso para editar este perfil'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            # Campos permitidos para actualizar
+            allowed_fields = [
+                'first_name',
+                'last_name',
+                'email',
+                'phone_number',
+                'document_front',
+                'document_back'
+            ]
+
+            # Filtrar solo los campos permitidos que vienen en la request
+            update_data = {
+                key: value for key, value in request.data.items() 
+                if key in allowed_fields
+            }
+
+            # Actualizar usuario
+            for key, value in update_data.items():
+                setattr(request.user, key, value)
+
+            request.user.save()
+
+            return Response({
+                'message': 'Perfil actualizado correctamente',
+                'user': UserProfileSerializer(request.user).data
+            })
+
+        except Exception as e:
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
