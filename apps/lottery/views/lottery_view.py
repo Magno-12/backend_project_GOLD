@@ -212,6 +212,56 @@ class LotteryResultViewSet(GenericViewSet):
             'winners': winners_data
         })
 
+    @action(detail=False, methods=['get'])
+    def user_prizes(self, request):
+        """Ver detalle completo de premios ganados por el usuario"""
+        try:
+            winning_bets = Bet.objects.filter(
+                user=request.user,
+                status='WON'
+            ).select_related('lottery').order_by('-draw_date')
+
+            prizes_detail = []
+            for bet in winning_bets:
+                prize_info = {
+                    'bet_id': str(bet.id),
+                    'lottery': bet.lottery.name,
+                    'draw_date': bet.draw_date,
+                    'number_played': bet.number,
+                    'series_played': bet.series,
+                    'amount_bet': str(bet.amount),
+                    'total_won': str(bet.won_amount),
+                    'winning_details': {
+                        'winning_number': bet.winning_details.get('number'),
+                        'winning_series': bet.winning_details.get('series'),
+                        'prizes': []
+                    }
+                }
+
+                # Detallar cada premio ganado
+                for prize in bet.winning_details.get('prizes', []):
+                    prize_info['winning_details']['prizes'].append({
+                        'type': prize.get('type'),
+                        'name': prize.get('name'),
+                        'amount': prize.get('amount'),
+                        'match_type': prize.get('match_type'),
+                        'details': prize.get('details', {})
+                    })
+
+                prizes_detail.append(prize_info)
+
+            return Response({
+                'total_winning_bets': len(prizes_detail),
+                'total_won': str(sum(bet.won_amount for bet in winning_bets)),
+                'prizes': prizes_detail
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class BetViewSet(GenericViewSet):
     serializer_class = BetSerializer
@@ -272,15 +322,15 @@ class BetViewSet(GenericViewSet):
     def winnings_summary(self, request):
         """Obtener resumen de ganancias del usuario"""
         user = request.user
-        
+
         # Obtener apuestas ganadoras
         winning_bets = self.get_queryset().filter(status='WON')
-        
+
         # Calcular totales
         total_won = sum(bet.won_amount for bet in winning_bets)
         total_bets = self.get_queryset().count()
         total_won_bets = winning_bets.count()
-        
+
         # Obtener saldo actual
         current_balance = UserBalance.objects.get(user=user).balance
 
