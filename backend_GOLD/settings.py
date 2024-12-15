@@ -14,6 +14,9 @@ from datetime import timedelta
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 
 # Cargar variables de entorno
 load_dotenv()
@@ -42,6 +45,7 @@ if RENDER_EXTERNAL_HOSTNAME:
 # Application definition
 
 DJANGO_APPS = [
+    'jazzmin',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -109,27 +113,27 @@ WSGI_APPLICATION = 'backend_GOLD.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': os.getenv('DB_NAME'),
-#         'USER': os.getenv('DB_USER'),
-#         'PASSWORD': os.getenv('DB_PASSWORD'),
-#         'HOST': os.getenv('DB_HOST'),
-#         'PORT': os.getenv('DB_PORT'),
-#     }
-# }
-#DATABASE-TEST
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'postgres',
-        'USER': 'postgres.skjbvqoleimipifehmae',
-        'PASSWORD': '5C3nxg:n7bp3Y2K',
-        'HOST': 'aws-0-us-west-1.pooler.supabase.com',
-        'PORT': 6543,
+        'NAME': os.getenv('DB_NAME'),
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
+        'HOST': os.getenv('DB_HOST'),
+        'PORT': os.getenv('DB_PORT'),
     }
 }
+#DATABASE-TEST
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'postgres',
+#         'USER': 'postgres.skjbvqoleimipifehmae',
+#         'PASSWORD': '5C3nxg:n7bp3Y2K',
+#         'HOST': 'aws-0-us-west-1.pooler.supabase.com',
+#         'PORT': 6543,
+#     }
+# }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
@@ -294,3 +298,132 @@ WOMPI_EVENTS_KEY = os.getenv('WOMPI_EVENTS_KEY')
 
 # Site URL es la URL base de tu aplicación
 SITE_URL = os.getenv('SITE_URL', 'http://localhost:8000')
+
+cloudinary.config(
+    cloud_name = "dklozvc71",
+    api_key = "738698377919262",
+    api_secret = "qk1laMOh5cXwMHBGUEbJ_l4lLWU", # Click 'View API Keys' above to copy your API secret
+    secure=True
+)
+
+JAZZMIN_SETTINGS = {
+    # título del sitio
+    "site_title": "GOLD Lottery Admin",
+    "site_header": "Sistema de Loterías",
+    "site_brand": "GOLD",
+    "site_logo": "photos/logo.png",  # opcional
+    "welcome_sign": "Administración de Loterías",
+    "copyright": "Lottery GOLD",
+
+    # Enlaces del menú superior
+    "topmenu_links": [
+        {"name": "Home", "url": "admin:index", "permissions": ["auth.view_user"]},
+        {"name": "Soporte", "url": "https://support.example.com", "new_window": True},
+    ],
+
+    # Personalización del menú lateral
+    "order_with_respect_to": [
+        "auth",
+        "users",
+        "lottery",
+        "payments",
+    ],
+
+    # Agrupación de modelos en el menú
+    "menu": [
+        {
+            "label": "Usuarios",
+            "icon": "fas fa-users",
+            "models": [
+                "users.User",
+                "auth.Group",
+            ]
+        },
+        {
+            "label": "Loterías",
+            "icon": "fas fa-ticket-alt",
+            "models": [
+                "lottery.Lottery",
+                "lottery.PrizePlan",
+                "lottery.Prize",
+                "lottery.PrizeType",
+            ]
+        },
+        {
+            "label": "Apuestas",
+            "icon": "fas fa-dice",
+            "models": [
+                "lottery.Bet",
+                "lottery.LotteryResult",
+            ]
+        },
+        {
+            "label": "Reportes",
+            "icon": "fas fa-chart-line",
+            "url": "admin:index"  # puedes poner aquí una vista personalizada
+        },
+    ],
+
+    # Iconos personalizados para modelos
+    "icons": {
+        "users.User": "fas fa-user",
+        "lottery.Lottery": "fas fa-ticket-alt",
+        "lottery.Bet": "fas fa-dice",
+        "lottery.Prize": "fas fa-trophy",
+        "lottery.PrizePlan": "fas fa-clipboard-list",
+        "lottery.LotteryResult": "fas fa-star",
+    },
+
+    # Personalización de UI
+    "custom_css": None,
+    "custom_js": None,
+    "show_ui_builder": True,
+    "changeform_format": "horizontal_tabs",
+    "changeform_format_overrides": {
+        "auth.user": "collapsible",
+        "lottery.lottery": "horizontal_tabs",
+    },
+    
+    # Opciones de UI
+    "related_modal_active": True,
+    "custom_links": {
+        "lottery": [{
+            "name": "Generar Reporte",
+            "url": "make_messages",
+            "icon": "fas fa-file",
+        }]
+    },
+}
+
+# Personalización de colores del tema
+JAZZMIN_UI_TWEAKS = {
+    "navbar_small_text": False,
+    "footer_small_text": False,
+    "body_small_text": False,
+    "brand_small_text": False,
+    "brand_colour": "navbar-success",
+    "accent": "accent-teal",
+    "navbar": "navbar-dark",
+    "no_navbar_border": False,
+    "navbar_fixed": False,
+    "layout_boxed": False,
+    "footer_fixed": False,
+    "sidebar_fixed": False,
+    "sidebar": "sidebar-dark-success",
+    "sidebar_nav_small_text": False,
+    "sidebar_disable_expand": False,
+    "sidebar_nav_child_indent": True,
+    "sidebar_nav_compact_style": False,
+    "sidebar_nav_legacy_style": False,
+    "sidebar_nav_flat_style": False,
+    "theme": "cyborg",
+    "dark_mode_theme": "cyborg",
+    "button_classes": {
+        "primary": "btn-primary",
+        "secondary": "btn-secondary",
+        "info": "btn-info",
+        "warning": "btn-warning",
+        "danger": "btn-danger",
+        "success": "btn-success"
+    }
+}

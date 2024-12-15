@@ -3,9 +3,11 @@ from django.db import models
 from django.core.validators import MinLengthValidator, MaxLengthValidator
 from apps.default.models.base_model import BaseModel
 from apps.users.utils.validators import validate_adult
+from apps.users.managers.user_manager import UserManager
 
 
 class User(AbstractUser, BaseModel):
+    objects = UserManager()
     username = None
     email = models.EmailField(unique=True)
     first_name = models.CharField(max_length=150)
@@ -23,6 +25,7 @@ class User(AbstractUser, BaseModel):
     document_front = models.ImageField(upload_to='documents/', null=True, blank=True)
     document_back = models.ImageField(upload_to='documents/', null=True, blank=True)
 
+    username = None
     USERNAME_FIELD = 'phone_number'
     REQUIRED_FIELDS = ['email', 'first_name', 'last_name', 'identification', 'birth_date']
 

@@ -1,6 +1,8 @@
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 
+from cloudinary.models import CloudinaryField
+
 from apps.default.models.base_model import BaseModel
 
 
@@ -47,6 +49,29 @@ class Lottery(BaseModel):
     logo_url = models.URLField('Logo URL', blank=True)
     is_active = models.BooleanField('Activa', default=True)
     requires_series = models.BooleanField('Requiere serie', default=True)
+
+    # Nuevos campos para Cloudinary
+    number_ranges_file = CloudinaryField(
+        'Archivo de rangos',
+        folder='lottery/ranges/',
+        resource_type='raw',
+        null=True,
+        blank=True
+    )
+    unsold_tickets_file = CloudinaryField(
+        'Archivo de billetes no vendidos',
+        folder='lottery/unsold/',
+        resource_type='raw',
+        null=True,
+        blank=True
+    )
+    sales_file = CloudinaryField(
+        'Archivo de ventas',
+        folder='lottery/sales/',
+        resource_type='raw',
+        null=True,
+        blank=True
+    )
 
     class Meta:
         verbose_name = 'Lotería'
