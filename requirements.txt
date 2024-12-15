@@ -95,3 +95,4 @@ daphne
 # Development and Debugging
 ipython
 django-extensions
+cloudinary
