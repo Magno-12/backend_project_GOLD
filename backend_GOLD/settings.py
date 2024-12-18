@@ -288,8 +288,8 @@ LOGGING = {
     },
 }
 
-LOTTERY_API_URL = 'https://lottery-results-api.onrender.com/results'
-LOTTERY_API_KEY = '47SFw0COzXcwePfecOUwWUXe9BrZhg'
+LOTTERY_API_URL = 'https://bsorh1cl1f.execute-api.us-east-1.amazonaws.com/dev/'
+LOTTERY_API_KEY = 'C7YHRNx2f04lI1hDWELJ1ajl48FP4ynu17oqN6v0'
 
 # Wompi Settings
 WOMPI_PUBLIC_KEY = os.getenv('WOMPI_PUBLIC_KEY')
