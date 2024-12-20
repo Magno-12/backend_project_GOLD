@@ -5,7 +5,7 @@ from rest_framework import status
 from rest_framework.viewsets import GenericViewSet
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.utils import timezone
 from django.db import transaction
 from decimal import Decimal
@@ -25,13 +25,13 @@ class LotteryResultViewSet(GenericViewSet):
     def get_queryset(self):
         return LotteryResult.objects.all().order_by('-fecha')
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], permission_classes=[AllowAny])
     def get_result(self, request):
         """Obtener y actualizar resultados de loterías"""
         try:
             response = requests.get(
-                'https://lottery-results-api.onrender.com/results',
-                headers={'x-api-key': '47SFw0COzXcwePfecOUwWUXe9BrZhg'}
+                'https://bsorh1cl1f.execute-api.us-east-1.amazonaws.com/dev/',
+                headers={'x-api-key': 'C7YHRNx2f04lI1hDWELJ1ajl48FP4ynu17oqN6v0'}
             )
 
             if response.status_code == 200:
@@ -276,7 +276,8 @@ class BetViewSet(GenericViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
-    def create(self, request):
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
+    def create_bet(self, request):
         """Crear nueva apuesta"""
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
