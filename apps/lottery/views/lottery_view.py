@@ -278,15 +278,65 @@ class BetViewSet(GenericViewSet):
 
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def create_bet(self, request):
-        """Crear nueva apuesta"""
-        serializer = self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save(
-                user=request.user,
-                status='PENDING'
-            )
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        """Crear apuestas múltiples o individual"""
+        # Verificar si es una lista de apuestas o una sola
+        if isinstance(request.data, list):
+            serializers = []
+            # Procesar cada apuesta
+            for bet_data in request.data:
+                serializer = self.get_serializer(data=bet_data)
+                if serializer.is_valid():
+                    serializers.append(serializer)
+                else:
+                    # Si alguna apuesta es inválida, retornar error
+                    return Response(
+                        {
+                            'error': 'Datos inválidos en una de las apuestas',
+                            'details': serializer.errors,
+                            'bet_data': bet_data
+                        }, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Si todas las apuestas son válidas, guardarlas
+            created_bets = []
+            try:
+                for serializer in serializers:
+                    bet = serializer.save(
+                        user=request.user,
+                        status='PENDING'
+                    )
+                    created_bets.append(bet)
+                
+                # Retornar todas las apuestas creadas
+                response_serializer = self.get_serializer(created_bets, many=True)
+                return Response(
+                    response_serializer.data, 
+                    status=status.HTTP_201_CREATED
+                )
+                
+            except Exception as e:
+                # Si ocurre un error al guardar, hacer rollback manual si es necesario
+                for bet in created_bets:
+                    bet.delete()
+                return Response(
+                    {
+                        'error': 'Error al crear las apuestas',
+                        'detail': str(e)
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        
+        # Si es una sola apuesta, mantener el comportamiento original
+        else:
+            serializer = self.get_serializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save(
+                    user=request.user,
+                    status='PENDING'
+                )
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def retrieve(self, request, pk=None):
         """Ver detalle de una apuesta"""
