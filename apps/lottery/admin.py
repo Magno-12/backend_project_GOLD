@@ -3,6 +3,7 @@ from django.http import HttpResponse
 from django.contrib import messages
 from django.core.files.base import ContentFile
 from django.utils.html import format_html
+from django.utils import timezone
 from django.db.models import Sum, Count
 import cloudinary
 import cloudinary.uploader
@@ -241,11 +242,30 @@ class PrizeAdmin(admin.ModelAdmin):
             obj.fraction_amount = obj.amount / obj.prize_plan.lottery.fraction_count
         super().save_model(request, obj, form, change)
 
-@admin.register(PrizePlan)
+@admin.register(PrizePlan)  # Registrar el modelo correcto
 class PrizePlanAdmin(admin.ModelAdmin):
-    list_display = ('lottery', 'name', 'start_date', 'end_date', 'is_active')
-    list_filter = ('is_active', 'lottery')
-    search_fields = ('name', 'lottery__name')
+    list_display = ['lottery', 'name', 'start_date', 'is_active', 'last_updated']
+    actions = ['upload_plan_file']
+    
+    def upload_plan_file(self, request, queryset):
+        if 'file' not in request.FILES:
+            self.message_user(request, "No se ha seleccionado archivo", level=messages.ERROR)
+            return
+            
+        for plan in queryset:
+            try:
+                result = cloudinary.uploader.upload(
+                    request.FILES['file'],
+                    resource_type='raw',
+                    folder=f'lottery/plans/',
+                    public_id=f'plan_{plan.lottery.code}_{timezone.now().strftime("%Y%m%d")}'
+                )
+                plan.plan_file = result['secure_url']
+                plan.save()
+                
+                self.message_user(request, f"Plan actualizado para {plan.lottery.name}")
+            except Exception as e:
+                self.message_user(request, f"Error: {str(e)}", level=messages.ERROR)
 
 @admin.register(PrizeType)
 class PrizeTypeAdmin(admin.ModelAdmin):
