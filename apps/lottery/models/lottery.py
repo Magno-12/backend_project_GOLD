@@ -53,6 +53,7 @@ class Lottery(BaseModel):
     logo_url = models.URLField('Logo URL', blank=True)
     is_active = models.BooleanField('Activa', default=True)
     requires_series = models.BooleanField('Requiere serie', default=True)
+    series = models.CharField('Series', max_length=255, blank=True, help_text='Series de la lotería separadas por comas')
 
     # Cloudinary files
     number_ranges_file = CloudinaryField(

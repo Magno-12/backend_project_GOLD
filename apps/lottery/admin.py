@@ -14,54 +14,46 @@ from .models import Lottery, Bet, LotteryResult, Prize, PrizePlan, PrizeType
 
 @admin.register(Lottery)
 class LotteryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'code', 'draw_day', 'draw_time', 'is_active', 
-                   'fraction_count', 'fraction_price', 'get_ranges_file', 
-                   'get_unsold_file', 'get_sales_file')
+    list_display = ('name', 'code', 'draw_day', 'draw_time', 'is_active', 'fraction_count', 'fraction_price', 'series', 'get_ranges_file', 'get_unsold_file', 'get_sales_file')
     list_filter = ('is_active', 'draw_day')
     search_fields = ('name', 'code')
     readonly_fields = ('number_ranges_file', 'unsold_tickets_file', 'sales_file')
     
     fieldsets = (
         ('Información Básica', {
-            'fields': (
-                'name', 'code', 'draw_day', 'draw_time', 'is_active', 
-                'requires_series'
-            )
+            'fields': ('name', 'code', 'draw_day', 'draw_time', 'is_active', 'requires_series')
         }),
         ('Configuración de Fracciones', {
-            'fields': (
-                'fraction_count', 'fraction_price', 'major_prize_amount'
-            )
+            'fields': ('fraction_count', 'fraction_price', 'major_prize_amount')
         }),
         ('Límites de Apuestas', {
-            'fields': (
-                'min_bet_amount', 'max_bet_amount'
-            )
+            'fields': ('min_bet_amount', 'max_bet_amount')
+        }),
+        ('Series', {
+            'fields': ('series',)
         }),
         ('Archivos', {
-            'fields': (
-                'number_ranges_file', 'unsold_tickets_file', 'sales_file'
-            )
-        })
+            'fields': ('number_ranges_file', 'unsold_tickets_file', 'sales_file')
+        }),
     )
     
     actions = ['process_ranges_file', 'generate_unsold_report', 'generate_sales_report']
 
     def get_ranges_file(self, obj):
         if obj.number_ranges_file:
-            return format_html('<a href="{}" target="_blank">Ver archivo</a>', obj.number_ranges_file)
+            return format_html('<a href="{}" target="_blank">Descargar</a>', obj.number_ranges_file)
         return '-'
     get_ranges_file.short_description = 'Archivo de Rangos'
 
     def get_unsold_file(self, obj):
         if obj.unsold_tickets_file:
-            return format_html('<a href="{}" target="_blank">Ver archivo</a>', obj.unsold_tickets_file)
+            return format_html('<a href="{}" target="_blank">Descargar</a>', obj.unsold_tickets_file)
         return '-'
     get_unsold_file.short_description = 'Billetes No Vendidos'
 
     def get_sales_file(self, obj):
         if obj.sales_file:
-            return format_html('<a href="{}" target="_blank">Ver archivo</a>', obj.sales_file)
+            return format_html('<a href="{}" target="_blank">Descargar</a>', obj.sales_file)
         return '-'
     get_sales_file.short_description = 'Archivo de Ventas'
 
@@ -109,7 +101,6 @@ class LotteryAdmin(admin.ModelAdmin):
 
         except Exception as e:
             self.message_user(request, f'Error procesando archivo: {str(e)}', level=messages.ERROR)
-
     process_ranges_file.short_description = "Procesar archivo de rangos"
 
     def generate_unsold_report(self, request, queryset):
@@ -155,7 +146,6 @@ class LotteryAdmin(admin.ModelAdmin):
 
         except Exception as e:
             self.message_user(request, f'Error generando reporte: {str(e)}', level=messages.ERROR)
-
     generate_unsold_report.short_description = "Generar reporte no vendidos"
 
     def generate_sales_report(self, request, queryset):
@@ -242,7 +232,7 @@ class PrizeAdmin(admin.ModelAdmin):
             obj.fraction_amount = obj.amount / obj.prize_plan.lottery.fraction_count
         super().save_model(request, obj, form, change)
 
-@admin.register(PrizePlan)  # Registrar el modelo correcto
+@admin.register(PrizePlan)
 class PrizePlanAdmin(admin.ModelAdmin):
     list_display = ['lottery', 'name', 'start_date', 'is_active', 'last_updated']
     actions = ['upload_plan_file']
@@ -266,6 +256,7 @@ class PrizePlanAdmin(admin.ModelAdmin):
                 self.message_user(request, f"Plan actualizado para {plan.lottery.name}")
             except Exception as e:
                 self.message_user(request, f"Error: {str(e)}", level=messages.ERROR)
+    upload_plan_file.short_description = "Subir archivo del plan de premios"
 
 @admin.register(PrizeType)
 class PrizeTypeAdmin(admin.ModelAdmin):
