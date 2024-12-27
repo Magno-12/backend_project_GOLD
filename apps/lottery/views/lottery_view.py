@@ -263,7 +263,7 @@ class LotteryResultViewSet(GenericViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], permission_classes=[AllowAny])
     def lottery_info(self, request):
         """Obtener información completa de todas las loterías con sus series"""
         try:
