@@ -11,6 +11,7 @@ from django.db import transaction
 from decimal import Decimal
 
 from apps.lottery.models import Lottery, LotteryResult, Bet
+from apps.lottery.models.prize_plan import PrizePlan
 from apps.lottery.serializers.lottery_serializer import LotteryResultSerializer, BetSerializer
 from apps.lottery.permissions.permissions import IsOwner, ResultsPermission
 from apps.lottery.services.api_service import LotteryAPIService
@@ -294,6 +295,74 @@ class LotteryResultViewSet(GenericViewSet):
                 lottery_data.append(lottery_info)
 
             return Response(lottery_data)
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+    @action(detail=False, methods=['get'])
+    def prize_plans(self, request):
+        """Obtener todos los planes de premios activos con sus documentos"""
+        try:
+            # Filtrar planes activos y ordenar por lotería
+            plans = PrizePlan.objects.filter(
+                is_active=True
+            ).select_related('lottery').order_by('lottery__name')
+
+            plans_data = []
+            for plan in plans:
+                plan_info = {
+                    "id": str(plan.id),
+                    "lottery_name": plan.lottery.name,
+                    "lottery_code": plan.lottery.code,
+                    "name": plan.name,
+                    "start_date": plan.start_date,
+                    "end_date": plan.end_date,
+                    "sorteo_number": plan.sorteo_number,
+                    "total_prize_amount": str(plan.total_prize_amount) if plan.total_prize_amount else None,
+                    "plan_file_url": plan.plan_file.url if plan.plan_file else None,
+                    "last_updated": plan.last_updated,
+                    "prizes": {
+                        "major": [],
+                        "secos": [],
+                        "approximations": {
+                            "same_series": [],
+                            "different_series": []
+                        },
+                        "special": []
+                    }
+                }
+
+                # Obtener premios organizados por tipo
+                prizes = plan.prizes.select_related('prize_type').order_by('order')
+                
+                for prize in prizes:
+                    prize_data = {
+                        "name": prize.name,
+                        "amount": str(prize.amount),
+                        "fraction_amount": str(prize.fraction_amount),
+                        "quantity": prize.quantity
+                    }
+
+                    if prize.prize_type.code == 'MAJOR':
+                        plan_info['prizes']['major'].append(prize_data)
+                    elif prize.prize_type.code == 'SECO':
+                        plan_info['prizes']['secos'].append(prize_data)
+                    elif prize.prize_type.code == 'APPROX_SAME_SERIES':
+                        plan_info['prizes']['approximations']['same_series'].append(prize_data)
+                    elif prize.prize_type.code == 'APPROX_DIFF_SERIES':
+                        plan_info['prizes']['approximations']['different_series'].append(prize_data)
+                    elif prize.prize_type.is_special:
+                        plan_info['prizes']['special'].append(prize_data)
+
+                plans_data.append(plan_info)
+
+            return Response({
+                "count": len(plans_data),
+                "results": plans_data
+            })
 
         except Exception as e:
             return Response(
