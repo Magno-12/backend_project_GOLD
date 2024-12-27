@@ -302,7 +302,7 @@ class LotteryResultViewSet(GenericViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=['get'], permission_classes=[AllowAny])
     def prize_plans(self, request):
         """Obtener todos los planes de premios activos con sus documentos"""
         try:
