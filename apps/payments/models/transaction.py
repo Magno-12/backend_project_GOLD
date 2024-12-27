@@ -53,6 +53,12 @@ class Transaction(BaseModel):
         'Detalle del error',
         blank=True
     )
+    signature = models.CharField(
+        'Firma de integridad',
+        max_length=255,
+        null=True,
+        blank=True
+    )
 
     class Meta:
         verbose_name = 'Transacción'

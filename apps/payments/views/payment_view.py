@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.utils import timezone
 from django.core.exceptions import ValidationError
 import uuid
 from decimal import Decimal
@@ -110,32 +111,31 @@ class PaymentViewSet(GenericViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
-    def verify(self, request, pk=None):
-        """Verificar estado de una transacción"""
+    def process_response(self, request, pk=None):
+        """Procesar respuesta del widget de Wompi"""
         try:
-            # Primero intentar buscar por UUID
-            try:
-                transaction = get_object_or_404(self.get_queryset(), pk=pk)
-            except ValidationError:
-                # Si no es UUID, buscar por wompi_id
-                transaction = get_object_or_404(self.get_queryset(), wompi_id=pk)
+            transaction = get_object_or_404(self.get_queryset(), pk=pk)
             
-            response = self.wompi_service.get_transaction(transaction.wompi_id)
-            if response.get('data'):
-                with transaction.atomic():
-                    transaction.status = response['data']['status']
-                    transaction.status_detail = response['data']
-                    transaction.save()
+            # Actualizar estado según la respuesta
+            wompi_status = request.data.get('status')
+            if wompi_status:
+                transaction.status = wompi_status
+                transaction.wompi_id = request.data.get('id')
+                transaction.status_detail = request.data
+                transaction.save()
 
-                    # Actualizar saldo si la transacción fue exitosa
-                    if transaction.status == 'APPROVED':
-                        balance, _ = UserBalance.objects.get_or_create(user=request.user)
+                # Si es aprobada, actualizar saldo
+                if wompi_status == 'APPROVED':
+                    with transaction.atomic():
+                        balance, _ = UserBalance.objects.get_or_create(
+                            user=transaction.user
+                        )
                         balance.balance += transaction.amount
                         balance.last_transaction = transaction
                         balance.save()
 
             return Response(TransactionSerializer(transaction).data)
-        
+
         except Exception as e:
             return Response(
                 {'error': str(e)},
@@ -212,6 +212,60 @@ class PaymentViewSet(GenericViewSet):
             transactions = self.get_queryset().order_by('-created_at')
             serializer = TransactionSerializer(transactions, many=True)
             return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+    @action(detail=False, methods=['post'])
+    def init_transaction(self, request):
+        """Iniciar una transacción para el widget de Wompi"""
+        try:
+            # Validar datos de entrada
+            amount = Decimal(request.data.get('monto', 0))
+            if amount <= 0:
+                return Response(
+                    {'error': 'Monto inválido'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Generar referencia única
+            reference = self.wompi_service.generate_reference()
+            
+            # Generar firma
+            amount_in_cents = int(amount * 100)
+            signature = self.wompi_service.generate_signature(
+                reference=reference,
+                amount_in_cents=amount_in_cents
+            )
+
+            # Crear transacción en estado pendiente
+            transaction = Transaction.objects.create(
+                user=request.user,
+                amount=amount,
+                reference=reference,
+                signature=signature,
+                status='PENDING',
+                payment_data={
+                    'cliente_id': str(request.user.id),
+                    'fecha_transaccion': timezone.now().isoformat(),
+                    'monto': str(amount),
+                    'moneda': 'COP',
+                    'descripcion': request.data.get('descripcion', 'Compra o recarga'),
+                    'estado': 'pendiente'
+                }
+            )
+
+            # Retornar datos necesarios para el widget
+            return Response({
+                'reference': reference,
+                'signature': signature,
+                'amount_in_cents': amount_in_cents,
+                'currency': 'COP',
+                'transaction_id': str(transaction.id)
+            })
+
         except Exception as e:
             return Response(
                 {'error': str(e)},
