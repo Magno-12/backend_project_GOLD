@@ -14,9 +14,18 @@ from .models import Lottery, Bet, LotteryResult, Prize, PrizePlan, PrizeType
 
 @admin.register(Lottery)
 class LotteryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'code', 'draw_day', 'draw_time', 'is_active', 
-                   'fraction_count', 'fraction_price', 'get_ranges_file', 
-                   'get_unsold_file', 'get_sales_file')
+    list_display = (
+        'name', 
+        'code', 
+        'draw_day', 
+        'draw_time', 
+        'is_active', 
+        'fraction_count', 
+        'fraction_price', 
+        'get_ranges_file', 
+        'get_unsold_file', 
+        'get_sales_file'
+    )
     list_filter = ('is_active', 'draw_day')
     search_fields = ('name', 'code')
     readonly_fields = ('number_ranges_file', 'unsold_tickets_file', 'sales_file')
@@ -25,7 +34,7 @@ class LotteryAdmin(admin.ModelAdmin):
         ('Información Básica', {
             'fields': (
                 'name', 'code', 'draw_day', 'draw_time', 'is_active', 
-                'requires_series'
+                'requires_series', 'available_series'
             )
         }),
         ('Configuración de Fracciones', {
@@ -38,14 +47,27 @@ class LotteryAdmin(admin.ModelAdmin):
                 'min_bet_amount', 'max_bet_amount'
             )
         }),
+        ('Configuración de Sorteos', {
+            'fields': (
+                'closing_time', 'last_draw_number', 'next_draw_date'
+            )
+        }),
         ('Archivos', {
             'fields': (
-                'number_ranges_file', 'unsold_tickets_file', 'sales_file'
+                'logo_url', 'number_ranges_file', 'unsold_tickets_file', 'sales_file'
             )
         })
     )
     
     actions = ['process_ranges_file', 'generate_unsold_report', 'generate_sales_report']
+
+    def formfield_for_dbfield(self, db_field, **kwargs):
+        if db_field.name == 'available_series':
+            kwargs['widget'] = TextInput(attrs={
+                'placeholder': 'Ejemplo: 123,456,789 (separar por comas)',
+                'style': 'width: 300px;'
+            })
+        return super().formfield_for_dbfield(db_field, **kwargs)
 
     def get_ranges_file(self, obj):
         if obj.number_ranges_file:
@@ -122,7 +144,7 @@ class LotteryAdmin(admin.ModelAdmin):
             content = []
             content.append("06")
             content.append("0993")
-            content.append(str(lottery.sorteo_number))
+            content.append(str(lottery.last_draw_number))
             
             unsold_tickets = lottery.bets.filter(status='PENDING')
             content.append(str(unsold_tickets.count()))
@@ -149,9 +171,7 @@ class LotteryAdmin(admin.ModelAdmin):
             lottery.unsold_tickets_file = result['secure_url']
             lottery.save()
 
-            response = HttpResponse(file_content, content_type='text/plain')
-            response['Content-Disposition'] = f'attachment; filename="devoluciones_{lottery.code}.txt"'
-            return response
+            self.message_user(request, "Reporte de no vendidos generado exitosamente", level=messages.SUCCESS)
 
         except Exception as e:
             self.message_user(request, f'Error generando reporte: {str(e)}', level=messages.ERROR)
@@ -168,7 +188,7 @@ class LotteryAdmin(admin.ModelAdmin):
             content = []
             content.append("VENTA06")
             content.append("0993")
-            content.append(str(lottery.sorteo_number))
+            content.append(str(lottery.last_draw_number))
 
             sold_tickets = lottery.bets.filter(status='PENDING')
             content.append(str(sold_tickets.count()))
@@ -177,7 +197,7 @@ class LotteryAdmin(admin.ModelAdmin):
                 line = (
                     f"{ticket.number:04d}"
                     f"{ticket.series:03d}"
-                    f"{ticket.fraction:03d}"
+                    f"{ticket.fractions:03d}"
                     f"{ticket.department_code:02d}"
                     f"{ticket.ticket_series:>5}"
                     f"{ticket.ticket_number:0>10}"
@@ -196,10 +216,7 @@ class LotteryAdmin(admin.ModelAdmin):
             lottery.sales_file = result['secure_url']
             lottery.save()
 
-            filename = f"V_discoin{lottery.sorteo_number}.06"
-            response = HttpResponse(file_content, content_type='text/plain')
-            response['Content-Disposition'] = f'attachment; filename="{filename}"'
-            return response
+            self.message_user(request, "Reporte de ventas generado exitosamente", level=messages.SUCCESS)
 
         except Exception as e:
             self.message_user(
@@ -211,9 +228,29 @@ class LotteryAdmin(admin.ModelAdmin):
     generate_sales_report.short_description = "Generar reporte de ventas"
 
     def save_model(self, request, obj, form, change):
+        # Procesar series si vienen como string
+        if isinstance(obj.available_series, str):
+            obj.available_series = [s.strip() for s in obj.available_series.split(',') if s.strip()]
+        
+        # Validar series
+        if obj.available_series:
+            # Verificar formato de series
+            invalid_series = [s for s in obj.available_series if not (s.isdigit() and len(s) == 3)]
+            if invalid_series:
+                self.message_user(
+                    request,
+                    f"Series inválidas: {', '.join(invalid_series)}. Deben ser números de 3 dígitos.",
+                    level=messages.ERROR
+                )
+                return
+            
+            # Eliminar duplicados
+            obj.available_series = list(set(obj.available_series))
+
         if change and 'is_active' in form.changed_data and not obj.is_active:
             # Lógica adicional al desactivar lotería
             pass
+
         super().save_model(request, obj, form, change)
 
 @admin.register(Bet)

@@ -3,6 +3,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils import timezone
 from datetime import time, timedelta
 from cloudinary.models import CloudinaryField
+from django.contrib.postgres.fields import ArrayField
 
 from apps.default.models.base_model import BaseModel
 
@@ -92,6 +93,14 @@ class Lottery(BaseModel):
         'Próxima fecha de sorteo',
         help_text='Se actualiza automáticamente',
         null=True,
+        blank=True
+    )
+
+    available_series = ArrayField(
+        models.CharField(max_length=3),
+        verbose_name='Series disponibles',
+        help_text='Series disponibles para esta lotería',
+        default=list,
         blank=True
     )
 

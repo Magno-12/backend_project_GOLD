@@ -263,6 +263,44 @@ class LotteryResultViewSet(GenericViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @action(detail=False, methods=['get'])
+    def lottery_info(self, request):
+        """Obtener información completa de todas las loterías con sus series"""
+        try:
+            lotteries = Lottery.objects.filter(is_active=True)
+            lottery_data = []
+
+            days_es = {
+                'MONDAY': 'Lunes',
+                'TUESDAY': 'Martes',
+                'WEDNESDAY': 'Miércoles',
+                'THURSDAY': 'Jueves',
+                'FRIDAY': 'Viernes',
+                'SATURDAY': 'Sábado',
+            }
+
+            for lottery in lotteries:
+                lottery_info = {
+                    "name": lottery.name,
+                    "amount": str(lottery.major_prize_amount),
+                    "time": lottery.closing_time.strftime("%H:%M"),
+                    "image": lottery.logo_url,
+                    "day": days_es.get(lottery.draw_day, lottery.draw_day),
+                    "fraction_value": str(lottery.fraction_price),
+                    "number_fractions": str(lottery.fraction_count),
+                    "sorteo": str(lottery.last_draw_number + 1),
+                    "series": lottery.available_series or []  # Series definidas en el admin
+                }
+                lottery_data.append(lottery_info)
+
+            return Response(lottery_data)
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class BetViewSet(GenericViewSet):
     serializer_class = BetSerializer
