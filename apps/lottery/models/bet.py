@@ -74,7 +74,7 @@ class Bet(BaseModel):
         constraints = [
             # Solo el número no se puede repetir en la misma lotería y fecha
             models.UniqueConstraint(
-                fields=['lottery', 'number', 'draw_date'],
+                fields=['lottery', 'number'],
                 name='unique_lottery_number_date'
             )
         ]

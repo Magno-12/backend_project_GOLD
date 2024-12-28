@@ -59,6 +59,16 @@ class Transaction(BaseModel):
         null=True,
         blank=True
     )
+    TRANSACTION_TYPES = (
+        ('RECHARGE', 'Recarga'),
+        ('PAYMENT', 'Pago')
+    )
+    transaction_type = models.CharField(
+        'Tipo de transacción',
+        max_length=20,
+        choices=TRANSACTION_TYPES,
+        default='RECHARGE'
+    )
 
     class Meta:
         verbose_name = 'Transacción'

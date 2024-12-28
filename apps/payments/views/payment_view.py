@@ -225,6 +225,8 @@ class PaymentViewSet(GenericViewSet):
         try:
             # Validar datos de entrada
             amount = Decimal(request.data.get('monto', 0))
+            transaction_type = request.data.get('tipo', 'RECHARGE')
+            
             if amount <= 0:
                 return Response(
                     {'error': 'Monto inválido'},
@@ -233,7 +235,7 @@ class PaymentViewSet(GenericViewSet):
 
             # Generar referencia única
             reference = self.wompi_service.generate_reference()
-
+            
             # Generar firma
             amount_in_cents = int(amount * 100)
             signature = self.wompi_service.generate_signature(
@@ -248,7 +250,7 @@ class PaymentViewSet(GenericViewSet):
                 reference=reference,
                 signature=signature,
                 status='PENDING',
-                payment_method=request.data.get('payment_method', 'CARD'),
+                transaction_type=transaction_type,
                 payment_data={
                     'amount_in_cents': amount_in_cents,
                     'currency': WOMPI_SETTINGS['CURRENCY']
@@ -277,31 +279,34 @@ class PaymentViewSet(GenericViewSet):
             try:
                 transaction_obj = get_object_or_404(self.get_queryset(), pk=pk)
             except ValidationError:
-                # Si no es UUID, intentar por wompi_id
                 try:
                     transaction_obj = get_object_or_404(self.get_queryset(), wompi_id=pk)
                 except:
-                    # Si no es wompi_id, buscar por referencia
                     transaction_obj = get_object_or_404(self.get_queryset(), reference=pk)
-                
-            # Obtener estado actual de Wompi usando la referencia si no hay wompi_id
+            
+            # Obtener estado de Wompi
             if transaction_obj.wompi_id:
                 response = self.wompi_service.get_transaction(transaction_obj.wompi_id)
             else:
-                # Buscar por referencia en Wompi
                 response = self.wompi_service.get_transaction_by_reference(transaction_obj.reference)
             
             if response.get('data'):
-                with transaction.atomic():  # Aquí usamos transaction.atomic()
+                with transaction.atomic():
                     # Actualizar el wompi_id si no lo teníamos
                     if not transaction_obj.wompi_id and response['data'].get('id'):
                         transaction_obj.wompi_id = response['data']['id']
                     
                     transaction_obj.status = response['data']['status']
                     transaction_obj.status_detail = response['data']
+                    
+                    # Actualizar el método de pago desde la respuesta de Wompi
+                    if response['data'].get('payment_method_type'):
+                        transaction_obj.payment_method = response['data']['payment_method_type']
+                    
                     transaction_obj.save()
 
-                    if transaction_obj.status == 'APPROVED':
+                    # Solo actualizar balance si es RECARGA y está APROBADA
+                    if transaction_obj.status == 'APPROVED' and transaction_obj.transaction_type == 'RECHARGE':
                         balance, _ = UserBalance.objects.get_or_create(user=transaction_obj.user)
                         balance.balance += transaction_obj.amount
                         balance.last_transaction = transaction_obj
