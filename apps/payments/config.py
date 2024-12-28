@@ -5,6 +5,7 @@ WOMPI_SETTINGS = {
     'SANDBOX_PUBLIC_KEY': settings.WOMPI_PUBLIC_KEY,
     'SANDBOX_PRIVATE_KEY': settings.WOMPI_PRIVATE_KEY,
     'SANDBOX_EVENTS_KEY': settings.WOMPI_EVENTS_KEY,
+    'SANDBOX_INTEGRITY_KEY': settings.WOMPI_INTEGRITY_KEY,
     'CURRENCY': 'COP',
     'REDIRECT_URL': f"{settings.SITE_URL}/api/payments/process/",
     'MIN_AMOUNT': 5000,  # 50 pesos

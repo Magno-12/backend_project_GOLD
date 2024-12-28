@@ -295,6 +295,7 @@ LOTTERY_API_KEY = 'C7YHRNx2f04lI1hDWELJ1ajl48FP4ynu17oqN6v0'
 WOMPI_PUBLIC_KEY = os.getenv('WOMPI_PUBLIC_KEY')
 WOMPI_PRIVATE_KEY = os.getenv('WOMPI_PRIVATE_KEY')
 WOMPI_EVENTS_KEY = os.getenv('WOMPI_EVENTS_KEY')
+WOMPI_INTEGRITY_KEY = os.getenv('WOMPI_INTEGRITY_KEY')
 
 # Site URL es la URL base de tu aplicación
 SITE_URL = os.getenv('SITE_URL', 'http://localhost:8000')
