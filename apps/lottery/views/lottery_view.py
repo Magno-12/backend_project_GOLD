@@ -387,20 +387,36 @@ class BetViewSet(GenericViewSet):
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def create_bet(self, request):
         """Crear apuestas múltiples o individual"""
-        # Verificar si es una lista de apuestas o una sola
+        
+        def check_balance(total_amount, user):
+            """Verifica si el usuario tiene saldo suficiente"""
+            try:
+                balance = UserBalance.objects.get(user=user)
+                return {
+                    'has_balance': balance.balance >= total_amount,
+                    'available': balance.balance,
+                    'balance_obj': balance
+                }
+            except UserBalance.DoesNotExist:
+                return {
+                    'has_balance': False,
+                    'available': 0,
+                    'balance_obj': None
+                }
+
+        # Si son múltiples apuestas
         if isinstance(request.data, list):
-            # Validar el total de todas las apuestas
             total_amount = sum(Decimal(str(bet.get('amount', 0))) for bet in request.data)
-            balance = UserBalance.objects.get(user=request.user)
-            if balance.balance < total_amount:
-                return Response(
-                    {
-                        'error': 'Saldo insuficiente para todas las apuestas',
-                        'required': str(total_amount),
-                        'available': str(balance.balance)
-                    }, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            balance_check = check_balance(total_amount, request.user)
+            
+            if not balance_check['has_balance']:
+                return Response({
+                    'error': 'Saldo insuficiente para todas las apuestas',
+                    'required': str(total_amount),
+                    'available': str(balance_check['available']),
+                    'needs_payment': True,
+                    'amount_needed': str(total_amount - balance_check['available'])
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
             serializers = []
             validation_errors = []
@@ -452,14 +468,11 @@ class BetViewSet(GenericViewSet):
 
             # Si hay errores de validación, retornarlos
             if validation_errors:
-                return Response(
-                    {
-                        'error': 'Errores de validación en algunas apuestas',
-                        'details': validation_errors
-                    }, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-                
+                return Response({
+                    'error': 'Errores de validación en algunas apuestas',
+                    'details': validation_errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+                    
             # Si todas las apuestas son válidas, guardarlas
             created_bets = []
             try:
@@ -474,8 +487,8 @@ class BetViewSet(GenericViewSet):
                         created_bets.append(bet)
                     
                     # Actualizar saldo del usuario
-                    balance.balance -= total_amount
-                    balance.save()
+                    balance_check['balance_obj'].balance -= total_amount
+                    balance_check['balance_obj'].save()
                     
                     # Retornar todas las apuestas creadas
                     response_serializer = self.get_serializer(created_bets, many=True)
@@ -486,17 +499,26 @@ class BetViewSet(GenericViewSet):
                     
             except Exception as e:
                 # Si ocurre un error al guardar, el rollback es automático por el atomic
-                return Response(
-                    {
-                        'error': 'Error al crear las apuestas',
-                        'detail': str(e)
-                    },
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
+                return Response({
+                    'error': 'Error al crear las apuestas',
+                    'detail': str(e)
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         # Si es una sola apuesta
         else:
             try:
+                amount = Decimal(str(request.data.get('amount')))
+                balance_check = check_balance(amount, request.user)
+
+                if not balance_check['has_balance']:
+                    return Response({
+                        'error': 'Saldo insuficiente',
+                        'required': str(amount),
+                        'available': str(balance_check['available']),
+                        'needs_payment': True,
+                        'amount_needed': str(amount - balance_check['available'])
+                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
                 lottery = Lottery.objects.get(name=request.data.get('lottery'))
                 validator = LotteryValidationService(lottery)
                 
@@ -506,7 +528,7 @@ class BetViewSet(GenericViewSet):
                     number=request.data.get('number'),
                     series=request.data.get('series'),
                     fractions=request.data.get('fractions', 1),
-                    amount=Decimal(str(request.data.get('amount')))
+                    amount=amount
                 )
                 
                 if not validation['is_valid']:
@@ -526,9 +548,8 @@ class BetViewSet(GenericViewSet):
                         )
                         
                         # Actualizar saldo
-                        balance = UserBalance.objects.get(user=request.user)
-                        balance.balance -= bet.amount
-                        balance.save()
+                        balance_check['balance_obj'].balance -= amount
+                        balance_check['balance_obj'].save()
                         
                         return Response(serializer.data, status=status.HTTP_201_CREATED)
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
