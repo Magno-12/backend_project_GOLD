@@ -72,12 +72,7 @@ class Bet(BaseModel):
         verbose_name_plural = 'Apuestas'
         ordering = ['-created_at']
         constraints = [
-            # No se puede repetir la serie en la misma lotería y fecha
-            models.UniqueConstraint(
-                fields=['lottery', 'series', 'draw_date'],
-                name='unique_lottery_series_date'
-            ),
-            # No se puede repetir el número en la misma lotería y fecha
+            # Solo el número no se puede repetir en la misma lotería y fecha
             models.UniqueConstraint(
                 fields=['lottery', 'number', 'draw_date'],
                 name='unique_lottery_number_date'

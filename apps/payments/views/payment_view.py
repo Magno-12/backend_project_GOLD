@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+from django.db import transaction
 import uuid
 from decimal import Decimal
 
@@ -274,39 +275,39 @@ class PaymentViewSet(GenericViewSet):
         try:
             # Intentar buscar por UUID
             try:
-                transaction = get_object_or_404(self.get_queryset(), pk=pk)
+                transaction_obj = get_object_or_404(self.get_queryset(), pk=pk)
             except ValidationError:
                 # Si no es UUID, intentar por wompi_id
                 try:
-                    transaction = get_object_or_404(self.get_queryset(), wompi_id=pk)
+                    transaction_obj = get_object_or_404(self.get_queryset(), wompi_id=pk)
                 except:
                     # Si no es wompi_id, buscar por referencia
-                    transaction = get_object_or_404(self.get_queryset(), reference=pk)
+                    transaction_obj = get_object_or_404(self.get_queryset(), reference=pk)
                 
             # Obtener estado actual de Wompi usando la referencia si no hay wompi_id
-            if transaction.wompi_id:
-                response = self.wompi_service.get_transaction(transaction.wompi_id)
+            if transaction_obj.wompi_id:
+                response = self.wompi_service.get_transaction(transaction_obj.wompi_id)
             else:
                 # Buscar por referencia en Wompi
-                response = self.wompi_service.get_transaction_by_reference(transaction.reference)
+                response = self.wompi_service.get_transaction_by_reference(transaction_obj.reference)
             
             if response.get('data'):
-                with transaction.atomic():
+                with transaction.atomic():  # Aquí usamos transaction.atomic()
                     # Actualizar el wompi_id si no lo teníamos
-                    if not transaction.wompi_id and response['data'].get('id'):
-                        transaction.wompi_id = response['data']['id']
+                    if not transaction_obj.wompi_id and response['data'].get('id'):
+                        transaction_obj.wompi_id = response['data']['id']
                     
-                    transaction.status = response['data']['status']
-                    transaction.status_detail = response['data']
-                    transaction.save()
+                    transaction_obj.status = response['data']['status']
+                    transaction_obj.status_detail = response['data']
+                    transaction_obj.save()
 
-                    if transaction.status == 'APPROVED':
-                        balance, _ = UserBalance.objects.get_or_create(user=transaction.user)
-                        balance.balance += transaction.amount
-                        balance.last_transaction = transaction
+                    if transaction_obj.status == 'APPROVED':
+                        balance, _ = UserBalance.objects.get_or_create(user=transaction_obj.user)
+                        balance.balance += transaction_obj.amount
+                        balance.last_transaction = transaction_obj
                         balance.save()
 
-            return Response(TransactionSerializer(transaction).data)
+            return Response(TransactionSerializer(transaction_obj).data)
             
         except Exception as e:
             return Response(
