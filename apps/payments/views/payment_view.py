@@ -271,3 +271,39 @@ class PaymentViewSet(GenericViewSet):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    @action(detail=True, methods=['post'])
+    def verify(self, request, pk=None):
+        """Verificar estado de una transacción"""
+        try:
+            # Primero intentar buscar por UUID
+            try:
+                transaction = get_object_or_404(self.get_queryset(), pk=pk)
+            except ValidationError:
+                # Si no es UUID, buscar por wompi_id
+                transaction = get_object_or_404(self.get_queryset(), wompi_id=pk)
+
+            # Obtener estado actual de Wompi
+            response = self.wompi_service.get_transaction(transaction.wompi_id)
+
+            if response.get('data'):
+                with transaction.atomic():
+                    # Actualizar estado de la transacción
+                    transaction.status = response['data']['status']
+                    transaction.status_detail = response['data']
+                    transaction.save()
+
+                    # Si la transacción fue exitosa, actualizar saldo
+                    if transaction.status == 'APPROVED':
+                        balance, _ = UserBalance.objects.get_or_create(user=request.user)
+                        balance.balance += transaction.amount
+                        balance.last_transaction = transaction
+                        balance.save()
+
+            return Response(TransactionSerializer(transaction).data)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
