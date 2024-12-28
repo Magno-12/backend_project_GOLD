@@ -217,7 +217,7 @@ class PaymentViewSet(GenericViewSet):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        
+
     @action(detail=False, methods=['post'])
     def init_transaction(self, request):
         """Iniciar una transacción para el widget de Wompi"""
@@ -232,7 +232,7 @@ class PaymentViewSet(GenericViewSet):
 
             # Generar referencia única
             reference = self.wompi_service.generate_reference()
-            
+
             # Generar firma
             amount_in_cents = int(amount * 100)
             signature = self.wompi_service.generate_signature(
@@ -247,22 +247,18 @@ class PaymentViewSet(GenericViewSet):
                 reference=reference,
                 signature=signature,
                 status='PENDING',
+                payment_method=request.data.get('payment_method', 'CARD'),
                 payment_data={
-                    'cliente_id': str(request.user.id),
-                    'fecha_transaccion': timezone.now().isoformat(),
-                    'monto': str(amount),
-                    'moneda': 'COP',
-                    'descripcion': request.data.get('descripcion', 'Compra o recarga'),
-                    'estado': 'pendiente'
+                    'amount_in_cents': amount_in_cents,
+                    'currency': WOMPI_SETTINGS['CURRENCY']
                 }
             )
 
-            # Retornar datos necesarios para el widget
             return Response({
                 'reference': reference,
                 'signature': signature,
                 'amount_in_cents': amount_in_cents,
-                'currency': 'COP',
+                'currency': WOMPI_SETTINGS['CURRENCY'],
                 'transaction_id': str(transaction.id)
             })
 
@@ -271,37 +267,47 @@ class PaymentViewSet(GenericViewSet):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
+
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
         """Verificar estado de una transacción"""
         try:
-            # Primero intentar buscar por UUID
+            # Intentar buscar por UUID
             try:
                 transaction = get_object_or_404(self.get_queryset(), pk=pk)
             except ValidationError:
-                # Si no es UUID, buscar por wompi_id
-                transaction = get_object_or_404(self.get_queryset(), wompi_id=pk)
-
-            # Obtener estado actual de Wompi
-            response = self.wompi_service.get_transaction(transaction.wompi_id)
-
+                # Si no es UUID, intentar por wompi_id
+                try:
+                    transaction = get_object_or_404(self.get_queryset(), wompi_id=pk)
+                except:
+                    # Si no es wompi_id, buscar por referencia
+                    transaction = get_object_or_404(self.get_queryset(), reference=pk)
+                
+            # Obtener estado actual de Wompi usando la referencia si no hay wompi_id
+            if transaction.wompi_id:
+                response = self.wompi_service.get_transaction(transaction.wompi_id)
+            else:
+                # Buscar por referencia en Wompi
+                response = self.wompi_service.get_transaction_by_reference(transaction.reference)
+            
             if response.get('data'):
                 with transaction.atomic():
-                    # Actualizar estado de la transacción
+                    # Actualizar el wompi_id si no lo teníamos
+                    if not transaction.wompi_id and response['data'].get('id'):
+                        transaction.wompi_id = response['data']['id']
+                    
                     transaction.status = response['data']['status']
                     transaction.status_detail = response['data']
                     transaction.save()
 
-                    # Si la transacción fue exitosa, actualizar saldo
                     if transaction.status == 'APPROVED':
-                        balance, _ = UserBalance.objects.get_or_create(user=request.user)
+                        balance, _ = UserBalance.objects.get_or_create(user=transaction.user)
                         balance.balance += transaction.amount
                         balance.last_transaction = transaction
                         balance.save()
 
             return Response(TransactionSerializer(transaction).data)
-
+            
         except Exception as e:
             return Response(
                 {'error': str(e)},

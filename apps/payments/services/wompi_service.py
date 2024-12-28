@@ -191,3 +191,20 @@ class WompiService:
         except requests.exceptions.RequestException as e:
             print(f"Error getting PSE banks: {str(e)}")
             return {}
+        
+    def get_transaction_by_reference(self, reference: str) -> Dict:
+        """Obtener transacción por referencia"""
+        url = f"{self.base_url}/transactions?reference={reference}"
+        try:
+            response = requests.get(
+                url,
+                headers=self._get_headers(private=True)
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get('data') and len(data['data']) > 0:
+                return {'data': data['data'][0]}
+            return {}
+        except requests.exceptions.RequestException as e:
+            print(f"Error getting transaction by reference: {str(e)}")
+            return {}
