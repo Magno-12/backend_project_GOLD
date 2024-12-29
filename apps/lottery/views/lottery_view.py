@@ -387,36 +387,27 @@ class BetViewSet(GenericViewSet):
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def create_bet(self, request):
         """Crear apuestas múltiples o individual"""
-        
-        def check_balance(total_amount, user):
-            """Verifica si el usuario tiene saldo suficiente"""
-            try:
-                balance = UserBalance.objects.get(user=user)
-                return {
-                    'has_balance': balance.balance >= total_amount,
-                    'available': balance.balance,
-                    'balance_obj': balance
-                }
-            except UserBalance.DoesNotExist:
-                return {
-                    'has_balance': False,
-                    'available': 0,
-                    'balance_obj': None
-                }
-
-        # Si son múltiples apuestas
+        # Verificar si es una lista de apuestas o una sola
         if isinstance(request.data, list):
+            # Validar el total de todas las apuestas
             total_amount = sum(Decimal(str(bet.get('amount', 0))) for bet in request.data)
-            balance_check = check_balance(total_amount, request.user)
             
-            if not balance_check['has_balance']:
-                return Response({
-                    'error': 'Saldo insuficiente para todas las apuestas',
-                    'required': str(total_amount),
-                    'available': str(balance_check['available']),
-                    'needs_payment': True,
-                    'amount_needed': str(total_amount - balance_check['available'])
-                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            try:
+                balance = UserBalance.objects.get(user=request.user)
+                if balance.balance < total_amount:
+                    return Response(
+                        {
+                            'error': 'Saldo insuficiente para todas las apuestas',
+                            'required': str(total_amount),
+                            'available': str(balance.balance)
+                        }, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except UserBalance.DoesNotExist:
+                return Response(
+                    {'error': 'Usuario no tiene saldo disponible'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
             serializers = []
             validation_errors = []
@@ -424,10 +415,11 @@ class BetViewSet(GenericViewSet):
             # Procesar cada apuesta
             for bet_data in request.data:
                 try:
+                    # Obtener la lotería y su próxima fecha de sorteo
                     lottery = Lottery.objects.get(name=bet_data.get('lottery'))
-                    validator = LotteryValidationService(lottery)
+                    bet_data['draw_date'] = lottery.next_draw_date
                     
-                    # Validar la apuesta
+                    validator = LotteryValidationService(lottery)
                     validation = validator.validate_bet_request(
                         user=request.user,
                         number=bet_data.get('number'),
@@ -468,66 +460,80 @@ class BetViewSet(GenericViewSet):
 
             # Si hay errores de validación, retornarlos
             if validation_errors:
-                return Response({
-                    'error': 'Errores de validación en algunas apuestas',
-                    'details': validation_errors
-                }, status=status.HTTP_400_BAD_REQUEST)
-                    
+                return Response(
+                    {
+                        'error': 'Errores de validación en algunas apuestas',
+                        'details': validation_errors
+                    }, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
             # Si todas las apuestas son válidas, guardarlas
             created_bets = []
             try:
                 with transaction.atomic():
+                    # Actualizar saldo del usuario primero
+                    balance.balance -= total_amount
+                    balance.save()
+
                     for data in serializers:
                         bet = data['serializer'].save(
                             user=request.user,
                             lottery=data['lottery'],
-                            status='PENDING',
-                            draw_date=data['lottery'].next_draw_date
+                            status='PENDING'
                         )
                         created_bets.append(bet)
-                    
-                    # Actualizar saldo del usuario
-                    balance_check['balance_obj'].balance -= total_amount
-                    balance_check['balance_obj'].save()
                     
                     # Retornar todas las apuestas creadas
                     response_serializer = self.get_serializer(created_bets, many=True)
                     return Response(
-                        response_serializer.data, 
+                        {
+                            'message': 'Apuestas creadas exitosamente',
+                            'bets': response_serializer.data,
+                            'total_amount': str(total_amount),
+                            'new_balance': str(balance.balance)
+                        }, 
                         status=status.HTTP_201_CREATED
                     )
                     
             except Exception as e:
                 # Si ocurre un error al guardar, el rollback es automático por el atomic
-                return Response({
-                    'error': 'Error al crear las apuestas',
-                    'detail': str(e)
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return Response(
+                    {
+                        'error': 'Error al crear las apuestas',
+                        'detail': str(e)
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
         
         # Si es una sola apuesta
         else:
             try:
-                amount = Decimal(str(request.data.get('amount')))
-                balance_check = check_balance(amount, request.user)
-
-                if not balance_check['has_balance']:
-                    return Response({
-                        'error': 'Saldo insuficiente',
-                        'required': str(amount),
-                        'available': str(balance_check['available']),
-                        'needs_payment': True,
-                        'amount_needed': str(amount - balance_check['available'])
-                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
-
+                # Obtener la lotería y su próxima fecha de sorteo
                 lottery = Lottery.objects.get(name=request.data.get('lottery'))
-                validator = LotteryValidationService(lottery)
+                bet_data = request.data.copy()
+                bet_data['draw_date'] = lottery.next_draw_date
+
+                # Validar saldo
+                amount = Decimal(str(bet_data.get('amount')))
+                balance = UserBalance.objects.get(user=request.user)
+                if balance.balance < amount:
+                    return Response(
+                        {
+                            'error': 'Saldo insuficiente',
+                            'required': str(amount),
+                            'available': str(balance.balance)
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
                 
                 # Validar la apuesta
+                validator = LotteryValidationService(lottery)
                 validation = validator.validate_bet_request(
                     user=request.user,
-                    number=request.data.get('number'),
-                    series=request.data.get('series'),
-                    fractions=request.data.get('fractions', 1),
+                    number=bet_data.get('number'),
+                    series=bet_data.get('series'),
+                    fractions=bet_data.get('fractions', 1),
                     amount=amount
                 )
                 
@@ -537,27 +543,43 @@ class BetViewSet(GenericViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                serializer = self.get_serializer(data=request.data)
+                serializer = self.get_serializer(data=bet_data)
                 if serializer.is_valid():
                     with transaction.atomic():
+                        # Actualizar saldo
+                        balance.balance -= amount
+                        balance.save()
+
+                        # Crear apuesta
                         bet = serializer.save(
                             user=request.user,
                             lottery=lottery,
-                            status='PENDING',
-                            draw_date=lottery.next_draw_date
+                            status='PENDING'
                         )
                         
-                        # Actualizar saldo
-                        balance_check['balance_obj'].balance -= amount
-                        balance_check['balance_obj'].save()
-                        
-                        return Response(serializer.data, status=status.HTTP_201_CREATED)
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                        return Response(
+                            {
+                                'message': 'Apuesta creada exitosamente',
+                                'bet': serializer.data,
+                                'amount': str(amount),
+                                'new_balance': str(balance.balance)
+                            }, 
+                            status=status.HTTP_201_CREATED
+                        )
+                return Response(
+                    serializer.errors, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
                 
             except Lottery.DoesNotExist:
                 return Response(
                     {'error': 'Lotería no encontrada'},
                     status=status.HTTP_404_NOT_FOUND
+                )
+            except UserBalance.DoesNotExist:
+                return Response(
+                    {'error': 'Usuario no tiene saldo disponible'},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
             except Exception as e:
                 return Response(
