@@ -9,9 +9,12 @@ from django.db.models import Sum, Count
 import cloudinary
 import cloudinary.uploader
 import csv
+import pytz
+from datetime import datetime, time
 from io import TextIOWrapper
 from datetime import datetime
 from .models import Lottery, Bet, LotteryResult, Prize, PrizePlan, PrizeType
+
 
 @admin.register(Lottery)
 class LotteryAdmin(admin.ModelAdmin):
@@ -22,14 +25,12 @@ class LotteryAdmin(admin.ModelAdmin):
         'draw_time', 
         'is_active', 
         'fraction_count', 
-        'fraction_price', 
-        'get_ranges_file', 
-        'get_unsold_file', 
-        'get_sales_file'
+        'fraction_price',
+        'betting_status', 
+        'next_draw_info'
     )
     list_filter = ('is_active', 'draw_day')
     search_fields = ('name', 'code')
-    readonly_fields = ('number_ranges_file', 'unsold_tickets_file', 'sales_file')
     
     fieldsets = (
         ('Información Básica', {
@@ -53,206 +54,255 @@ class LotteryAdmin(admin.ModelAdmin):
                 'closing_time', 'last_draw_number', 'next_draw_date'
             )
         }),
-        ('Archivos', {
-            'fields': (
-                'logo_url', 'number_ranges_file', 'unsold_tickets_file', 'sales_file'
-            )
-        })
     )
-    
-    actions = ['process_ranges_file', 'generate_unsold_report', 'generate_sales_report']
 
-    def formfield_for_dbfield(self, db_field, **kwargs):
-        if db_field.name == 'available_series':
-            kwargs['widget'] = TextInput(attrs={
-                'placeholder': 'Ejemplo: 123,456,789 (separar por comas)',
-                'style': 'width: 300px;'
-            })
-        return super().formfield_for_dbfield(db_field, **kwargs)
+    actions = [
+        'generate_sales_file',
+        'generate_unsold_file', 
+        'generate_type_204_report'
+    ]
 
-    def get_ranges_file(self, obj):
-        if obj.number_ranges_file:
-            return format_html('<a href="{}" target="_blank">Ver archivo</a>', obj.number_ranges_file)
-        return '-'
-    get_ranges_file.short_description = 'Archivo de Rangos'
-
-    def get_unsold_file(self, obj):
-        if obj.unsold_tickets_file:
-            return format_html('<a href="{}" target="_blank">Ver archivo</a>', obj.unsold_tickets_file)
-        return '-'
-    get_unsold_file.short_description = 'Billetes No Vendidos'
-
-    def get_sales_file(self, obj):
-        if obj.sales_file:
-            return format_html('<a href="{}" target="_blank">Ver archivo</a>', obj.sales_file)
-        return '-'
-    get_sales_file.short_description = 'Archivo de Ventas'
-
-    def process_ranges_file(self, request, queryset):
-        if len(queryset) != 1:
-            self.message_user(request, "Seleccione una sola lotería", level=messages.ERROR)
-            return
-
-        if 'file' not in request.FILES:
-            self.message_user(request, "No se ha seleccionado ningún archivo", level=messages.ERROR)
-            return
-
-        try:
-            lottery = queryset[0]
-            csv_file = request.FILES['file']
-            file_data = TextIOWrapper(csv_file, encoding='utf-8')
-            reader = csv.reader(file_data)
-            valid_rows = []
+    def betting_status(self, obj):
+        """Estado actual de las apuestas"""
+        bogota_tz = pytz.timezone('America/Bogota')
+        now = timezone.now().astimezone(bogota_tz)
+        
+        if not obj.is_active:
+            status = 'Inactiva'
+            color = 'red'
+        elif now > bogota_tz.localize(datetime.combine(now.date(), obj.closing_time)):
+            status = 'Cerrada'
+            color = 'red'
+        else:
+            status = 'Abierta'
+            color = 'green'
             
-            for row in reader:
-                if len(row) == 1:
-                    number = row[0].split(',')
-                    if len(number) == 4:
-                        valid_rows.append(row[0])
+        return format_html(
+            '<span style="color: {};">{}</span>',
+            color,
+            status
+        )
+    betting_status.short_description = 'Estado Apuestas'
 
-            if not valid_rows:
-                self.message_user(request, "El archivo no contiene datos válidos", level=messages.ERROR)
-                return
+    def next_draw_info(self, obj):
+        return f"Sorteo #{obj.last_draw_number + 1} - {obj.next_draw_date}"
+    next_draw_info.short_description = 'Próximo Sorteo'
 
-            result = cloudinary.uploader.upload(
-                csv_file,
-                resource_type='raw',
-                folder=f'lottery/ranges/',
-                public_id=f'ranges_{lottery.code}_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
-            )
-
-            lottery.number_ranges_file = result['secure_url']
-            lottery.save()
-
-            self.message_user(
-                request, 
-                f'Archivo procesado exitosamente. {len(valid_rows)} rangos válidos.',
-                level=messages.SUCCESS
-            )
-
-        except Exception as e:
-            self.message_user(request, f'Error procesando archivo: {str(e)}', level=messages.ERROR)
-
-    process_ranges_file.short_description = "Procesar archivo de rangos"
-
-    def generate_unsold_report(self, request, queryset):
+    def generate_sales_file(self, request, queryset):
+        """Genera archivo de ventas"""
         if len(queryset) != 1:
             self.message_user(request, "Seleccione una sola lotería", level=messages.ERROR)
             return
 
         lottery = queryset[0]
         try:
+            # Obtener apuestas vendidas
+            sold_bets = Bet.objects.filter(
+                lottery=lottery,
+                draw_date=lottery.next_draw_date,
+                status='PENDING'
+            ).select_related('user')
+
+            # Crear contenido del archivo
             content = []
-            content.append("06")
-            content.append("0993")
-            content.append(str(lottery.last_draw_number))
-            
-            unsold_tickets = lottery.bets.filter(status='PENDING')
-            content.append(str(unsold_tickets.count()))
-            
+            # Encabezado
+            content.append("VENTA06")  # Código de lotería
+            content.append("0993")     # Código distribuidor
+            content.append(f"{lottery.last_draw_number + 1:04d}")  # Número sorteo
+            content.append(f"{len(sold_bets):07d}")  # Total ventas
+
+            # Detalle de ventas
+            for bet in sold_bets:
+                line = (
+                    f"{bet.number:04d}"           # Número
+                    f"{bet.series:03d}"           # Serie
+                    f"{int(bet.amount/lottery.fraction_price):03d}"  # Fracciones
+                    f"19"                         # Código departamento
+                    f"{'BBC':>5}"                 # Serie tiquete
+                    f"{bet.id:0>10}"              # Consecutivo
+                    f"GOLD{bet.id:014}"           # Código seguridad
+                )
+                content.append(line)
+
+            # Generar archivo
+            filename = f"V_0993{lottery.last_draw_number + 1}.txt"
+            response = HttpResponse(
+                '\n'.join(content),
+                content_type='text/plain'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+
+        except Exception as e:
+            self.message_user(request, f'Error: {str(e)}', level=messages.ERROR)
+
+    generate_sales_file.short_description = "Generar archivo de ventas"
+
+    def generate_unsold_file(self, request, queryset):
+        """Genera archivo de billetes no vendidos"""
+        if len(queryset) != 1:
+            self.message_user(request, "Seleccione una sola lotería", level=messages.ERROR)
+            return
+
+        lottery = queryset[0]
+        try:
+            # Obtener billetes no vendidos
+            unsold_tickets = Bet.objects.filter(
+                lottery=lottery,
+                draw_date=lottery.next_draw_date,
+                status='PENDING'
+            )
+
+            # Crear contenido del archivo
+            content = []
+            content.append("06")  # Código lotería
+            content.append("0993")  # Código distribuidor
+            content.append(f"{lottery.last_draw_number + 1}")  # Número sorteo
+            content.append(f"{unsold_tickets.count()}")  # Total no vendidos
+
+            # Detalle billetes no vendidos
             for ticket in unsold_tickets:
                 line = (
-                    f"{ticket.number:04d}"
-                    f"{ticket.series:03d}"
-                    f"{lottery.fraction_count:03d}"
-                    f"{lottery.fraction_count:02d}"
-                    f"001"
-                    f"01"
+                    f"{ticket.number:04d}"  # Número
+                    f"{ticket.series:03d}"  # Serie
+                    f"{lottery.fraction_count:03d}"  # Fracciones totales
+                    f"{lottery.fraction_count:02d}"  # Fracciones devueltas
+                    f"001"  # Número paquete
+                    f"01"   # Posición
                 )
                 content.append(line)
 
-            file_content = '\n'.join(content)
-            result = cloudinary.uploader.upload(
-                ContentFile(file_content.encode()),
-                resource_type='raw',
-                folder=f'lottery/unsold/',
-                public_id=f'unsold_{lottery.code}_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
+            # Generar archivo
+            filename = f"D_0993{lottery.last_draw_number + 1}.txt"
+            response = HttpResponse(
+                '\n'.join(content),
+                content_type='text/plain'
             )
-
-            lottery.unsold_tickets_file = result['secure_url']
-            lottery.save()
-
-            self.message_user(request, "Reporte de no vendidos generado exitosamente", level=messages.SUCCESS)
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
 
         except Exception as e:
-            self.message_user(request, f'Error generando reporte: {str(e)}', level=messages.ERROR)
+            self.message_user(request, f'Error: {str(e)}', level=messages.ERROR)
 
-    generate_unsold_report.short_description = "Generar reporte no vendidos"
+    generate_unsold_file.short_description = "Generar archivo no vendidos"
 
-    def generate_sales_report(self, request, queryset):
+    def generate_type_204_report(self, request, queryset):
+        """Genera el archivo tipo 204 para SuperSalud"""
         if len(queryset) != 1:
             self.message_user(request, "Seleccione una sola lotería", level=messages.ERROR)
             return
 
         lottery = queryset[0]
+        allowed, message = self.is_betting_allowed(lottery)
+        if allowed:
+            self.message_user(
+                request, 
+                "Aún no es hora de generar el reporte 204", 
+                level=messages.ERROR
+            )
+            return
+
         try:
+            # Generar contenido archivo tipo 204
             content = []
-            content.append("VENTA06")
-            content.append("0993")
-            content.append(str(lottery.last_draw_number))
+            # Líneas de encabezado
+            content.append(f"{lottery.code[:2]:0>2}")  # Código lotería
+            content.append("0993")  # Código distribuidor
+            content.append(f"{lottery.last_draw_number + 1:04d}")  # Número sorteo
 
-            sold_tickets = lottery.bets.filter(status='PENDING')
-            content.append(str(sold_tickets.count()))
+            # Obtener billetes vendidos
+            sold_tickets = Bet.objects.filter(
+                lottery=lottery,
+                draw_date=lottery.next_draw_date,
+                status='PENDING'
+            ).select_related('user')
 
-            for ticket in sold_tickets:
+            # Total fracciones vendidas
+            total_fractions = sum(
+                int(bet.amount/lottery.fraction_price) 
+                for bet in sold_tickets
+            )
+            content.append(f"{total_fractions:07d}")
+
+            # Detalle billetes vendidos
+            for bet in sold_tickets:
                 line = (
-                    f"{ticket.number:04d}"
-                    f"{ticket.series:03d}"
-                    f"{ticket.fractions:03d}"
-                    f"{ticket.department_code:02d}"
-                    f"{ticket.ticket_series:>5}"
-                    f"{ticket.ticket_number:0>10}"
-                    f"{ticket.security_code:14}"
+                    f"{bet.number:04d}{bet.series:03d}"
+                    f"{int(bet.amount/lottery.fraction_price):03d}19"
+                    f"{'BBC'}{bet.id:0>10}"
+                    f"GOLD{bet.id:014}"
                 )
                 content.append(line)
 
-            file_content = '\n'.join(content)
-            result = cloudinary.uploader.upload(
-                ContentFile(file_content.encode()),
-                resource_type='raw',
-                folder=f'lottery/sales/',
-                public_id=f'sales_{lottery.code}_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
+            # Generar archivo
+            filename = f"204_{lottery.code}_{lottery.last_draw_number + 1}.txt"
+            response = HttpResponse(
+                '\n'.join(content),
+                content_type='text/plain'
             )
-
-            lottery.sales_file = result['secure_url']
-            lottery.save()
-
-            self.message_user(request, "Reporte de ventas generado exitosamente", level=messages.SUCCESS)
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
 
         except Exception as e:
             self.message_user(
                 request, 
-                f'Error generando archivo de ventas: {str(e)}',
+                f'Error generando archivo tipo 204: {str(e)}',
                 level=messages.ERROR
             )
 
-    generate_sales_report.short_description = "Generar reporte de ventas"
+    generate_type_204_report.short_description = "Generar reporte tipo 204"
+
+    def is_betting_allowed(self, lottery):
+        """Verifica si se permite apostar en este momento"""
+        bogota_tz = pytz.timezone('America/Bogota')
+        now = timezone.now().astimezone(bogota_tz)
+        
+        if not lottery.is_active:
+            return False, "Lotería inactiva"
+
+        # Validar día
+        day_map = {
+            'MONDAY': 0, 'TUESDAY': 1, 'WEDNESDAY': 2,
+            'THURSDAY': 3, 'FRIDAY': 4, 'SATURDAY': 5
+        }
+        if now.weekday() != day_map.get(lottery.draw_day):
+            return False, "No es día de sorteo"
+
+        # Validar hora de cierre
+        closing_datetime = bogota_tz.localize(
+            datetime.combine(now.date(), lottery.closing_time)
+        )
+        if now > closing_datetime:
+            return False, "Fuera de horario de apuestas"
+
+        return True, "Apuestas permitidas"
 
     def save_model(self, request, obj, form, change):
-        # Procesar series si vienen como string
+        # Procesar series disponibles
         if isinstance(obj.available_series, str):
-            obj.available_series = [s.strip() for s in obj.available_series.split(',') if s.strip()]
+            obj.available_series = [
+                s.strip() for s in obj.available_series.split(',') 
+                if s.strip()
+            ]
         
         # Validar series
         if obj.available_series:
-            # Verificar formato de series
-            invalid_series = [s for s in obj.available_series if not (s.isdigit() and len(s) == 3)]
+            invalid_series = [
+                s for s in obj.available_series 
+                if not (s.isdigit() and len(s) == 3)
+            ]
             if invalid_series:
-                self.message_user(
+                messages.error(
                     request,
-                    f"Series inválidas: {', '.join(invalid_series)}. Deben ser números de 3 dígitos.",
-                    level=messages.ERROR
+                    f"Series inválidas: {', '.join(invalid_series)}. "
+                    "Deben ser números de 3 dígitos."
                 )
                 return
             
-            # Eliminar duplicados
             obj.available_series = list(set(obj.available_series))
 
-        if change and 'is_active' in form.changed_data and not obj.is_active:
-            # Lógica adicional al desactivar lotería
-            pass
-
         super().save_model(request, obj, form, change)
+
 
 @admin.register(Bet)
 class BetAdmin(admin.ModelAdmin):

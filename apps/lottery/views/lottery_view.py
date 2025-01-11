@@ -1,5 +1,6 @@
 import requests
-from datetime import time, datetime
+from datetime import time, datetime, timedelta
+from django.utils import timezone
 
 from rest_framework import status
 from rest_framework.viewsets import GenericViewSet
@@ -653,3 +654,80 @@ class BetViewSet(GenericViewSet):
             'win_rate': f"{(total_won_bets/total_bets*100):.2f}%" if total_bets > 0 else "0%",
             'recent_wins': recent_wins_data
         })
+
+    @action(detail=False, methods=['get'])
+    def user_ganancias(self, request):
+        """Endpoint para la pantalla de ganancias"""
+        try:
+            start_date = timezone.now() - timedelta(days=30)
+            
+            # Usar select_related para optimizar queries
+            winning_bets = Bet.objects.filter(
+                user=request.user,
+                status='WON',
+                created_at__gte=start_date
+            ).select_related(
+                'lottery'
+            ).order_by('-created_at')[:10]  # Limitar a últimas 10
+
+            # Calcular resumen
+            summary = {
+                'total_ganado': sum(bet.won_amount for bet in winning_bets),
+                'total_apostado': Bet.objects.filter(
+                    user=request.user,
+                    created_at__gte=start_date
+                ).count(),
+                'ultima_actualizacion': timezone.now()
+            }
+
+            response_data = {
+                'summary': summary,
+                'recent_wins': [{
+                    'lottery_name': bet.lottery.name,
+                    'number': bet.number,
+                    'amount_won': str(bet.won_amount),
+                    'draw_date': bet.draw_date,
+                    'prize_details': bet.winning_details.get('prizes', [])
+                } for bet in winning_bets]
+            }
+
+            return Response(response_data)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'])
+    def historic_ganancias(self, request):
+        """Endpoint para cargar más resultados históricos"""
+        try:
+            page = int(request.query_params.get('page', 1))
+            page_size = 20
+            
+            winning_bets = Bet.objects.filter(
+                user=request.user,
+                status='WON'
+            ).select_related(
+                'lottery'
+            ).order_by('-created_at')[
+                (page-1)*page_size:page*page_size
+            ]
+
+            return Response({
+                'results': [{
+                    'lottery_name': bet.lottery.name,
+                    'number': bet.number,
+                    'amount_won': str(bet.won_amount),
+                    'draw_date': bet.draw_date,
+                    'prize_details': bet.winning_details.get('prizes', [])
+                } for bet in winning_bets],
+                'has_more': winning_bets.count() == page_size
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

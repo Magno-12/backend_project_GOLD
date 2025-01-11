@@ -4,6 +4,9 @@ from django.utils import timezone
 from datetime import time, timedelta
 from cloudinary.models import CloudinaryField
 from django.contrib.postgres.fields import ArrayField
+import pytz
+from decimal import Decimal
+from datetime import datetime, time
 
 from apps.default.models.base_model import BaseModel
 
@@ -43,13 +46,13 @@ class Lottery(BaseModel):
         'Apuesta mínima',
         max_digits=20,
         decimal_places=2,
-        validators=[MinValueValidator(0)]
+        validators=[MinValueValidator(Decimal('0.00'))]
     )
     max_bet_amount = models.DecimalField(
         'Apuesta máxima',
         max_digits=20,
         decimal_places=2,
-        validators=[MinValueValidator(0)]
+        validators=[MinValueValidator(Decimal('0.00'))]
     )
     logo_url = models.URLField('Logo URL', blank=True)
     is_active = models.BooleanField('Activa', default=True)
@@ -151,3 +154,58 @@ class Lottery(BaseModel):
         """Verifica si la lotería está abierta para apuestas"""
         now = timezone.now().time()
         return now < self.closing_time and self.is_active
+    
+    def is_betting_allowed(self) -> tuple[bool, str]:
+        """
+        Verifica si se permiten apuestas en este momento.
+        Retorna una tupla de (permitido, mensaje)
+        """
+        bogota_tz = pytz.timezone('America/Bogota')
+        now = timezone.now().astimezone(bogota_tz)
+        
+        # Convertir draw_day a número (0 = Lunes, 6 = Domingo)
+        day_map = {
+            'MONDAY': 0, 'TUESDAY': 1, 'WEDNESDAY': 2,
+            'THURSDAY': 3, 'FRIDAY': 4, 'SATURDAY': 5
+        }
+        draw_day_num = day_map.get(self.draw_day)
+        current_day = now.weekday()
+
+        # Si no es el día del sorteo
+        if current_day != draw_day_num:
+            return False, "Las apuestas solo se permiten el día del sorteo"
+
+        # Convertir closing_time a datetime de hoy
+        closing_datetime = bogota_tz.localize(
+            datetime.combine(now.date(), self.closing_time)
+        )
+
+        # Si ya pasó la hora de cierre
+        if now > closing_datetime:
+            next_draw = self.get_next_draw_date()
+            return False, f"Fuera del horario permitido. Próximo sorteo: {next_draw}"
+
+        # Si la lotería está inactiva
+        if not self.is_active:
+            return False, "Esta lotería no está activa actualmente"
+
+        return True, "Apuestas permitidas"
+
+    def get_next_draw_date(self):
+        """Obtiene la fecha del próximo sorteo"""
+        bogota_tz = pytz.timezone('America/Bogota')
+        now = timezone.now().astimezone(bogota_tz)
+        
+        day_map = {
+            'MONDAY': 0, 'TUESDAY': 1, 'WEDNESDAY': 2,
+            'THURSDAY': 3, 'FRIDAY': 4, 'SATURDAY': 5
+        }
+        draw_day_num = day_map.get(self.draw_day)
+        current_day = now.weekday()
+        
+        days_ahead = draw_day_num - current_day
+        if days_ahead <= 0: # Si ya pasó el día esta semana
+            days_ahead += 7
+            
+        next_draw = now.date() + timedelta(days=days_ahead)
+        return next_draw

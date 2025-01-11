@@ -92,6 +92,11 @@ class LotteryValidationService:
                 f"El monto debe estar entre {self.lottery.min_bet_amount} y {self.lottery.max_bet_amount}"
             )
 
+        # 9. Validar horario
+        is_allowed, message = self.lottery.is_betting_allowed()
+        if not is_allowed:
+            self.validation_errors.append(message)
+
         return {
             'is_valid': len(self.validation_errors) == 0,
             'errors': self.validation_errors

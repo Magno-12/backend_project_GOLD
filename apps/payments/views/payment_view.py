@@ -226,7 +226,7 @@ class PaymentViewSet(GenericViewSet):
             # Validar datos de entrada
             amount = Decimal(request.data.get('monto', 0))
             transaction_type = request.data.get('tipo', 'RECHARGE')
-            
+
             if amount <= 0:
                 return Response(
                     {'error': 'Monto inválido'},
