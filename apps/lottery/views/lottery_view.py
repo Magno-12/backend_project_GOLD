@@ -394,7 +394,7 @@ class BetViewSet(GenericViewSet):
             total_amount = sum(Decimal(str(bet.get('amount', 0))) for bet in request.data)
             
             try:
-                balance = UserBalance.objects.get(user=request.user)
+                balance = UserBalance.objects.select_for_update().get(user=request.user)
                 if balance.balance < total_amount:
                     return Response(
                         {
@@ -416,23 +416,28 @@ class BetViewSet(GenericViewSet):
             # Procesar cada apuesta
             for bet_data in request.data:
                 try:
-                    # Obtener la lotería y su próxima fecha de sorteo
+                    # Obtener la lotería 
                     lottery = Lottery.objects.get(name=bet_data.get('lottery'))
-                    bet_data['draw_date'] = lottery.next_draw_date
                     
-                    validator = LotteryValidationService(lottery)
-                    validation = validator.validate_bet_request(
-                        user=request.user,
-                        number=bet_data.get('number'),
-                        series=bet_data.get('series'),
-                        fractions=bet_data.get('fractions', 1),
-                        amount=Decimal(str(bet_data.get('amount')))
-                    )
-                    
-                    if not validation['is_valid']:
+                    # Validar si está en horario de apuestas
+                    if not lottery.is_open_for_bets():
                         validation_errors.append({
                             'bet_data': bet_data,
-                            'errors': validation['errors']
+                            'errors': ['Lotería cerrada para apuestas']
+                        })
+                        continue
+
+                    bet_data['draw_date'] = lottery.next_draw_date
+                    number = bet_data.get('number')
+                    series = bet_data.get('series')
+                    fractions = bet_data.get('fractions', 1)
+
+                    # Validar rango y combinación número-serie
+                    is_valid, message = lottery.validate_bet(number, series, fractions)
+                    if not is_valid:
+                        validation_errors.append({
+                            'bet_data': bet_data,
+                            'errors': [message]
                         })
                         continue
 
@@ -441,7 +446,7 @@ class BetViewSet(GenericViewSet):
                         serializers.append({
                             'serializer': serializer,
                             'lottery': lottery,
-                            'validation': validation
+                            'validation': {'is_valid': True}
                         })
                     else:
                         validation_errors.append({
@@ -466,7 +471,7 @@ class BetViewSet(GenericViewSet):
                         'error': 'Errores de validación en algunas apuestas',
                         'details': validation_errors
                     }, 
-                    status=status.HTTP_400_BAD_REQUEST
+                    status.HTTP_400_BAD_REQUEST
                 )
                 
             # Si todas las apuestas son válidas, guardarlas
@@ -485,7 +490,6 @@ class BetViewSet(GenericViewSet):
                         )
                         created_bets.append(bet)
                     
-                    # Retornar todas las apuestas creadas
                     response_serializer = self.get_serializer(created_bets, many=True)
                     return Response(
                         {
@@ -498,7 +502,6 @@ class BetViewSet(GenericViewSet):
                     )
                     
             except Exception as e:
-                # Si ocurre un error al guardar, el rollback es automático por el atomic
                 return Response(
                     {
                         'error': 'Error al crear las apuestas',
@@ -510,14 +513,21 @@ class BetViewSet(GenericViewSet):
         # Si es una sola apuesta
         else:
             try:
-                # Obtener la lotería y su próxima fecha de sorteo
                 lottery = Lottery.objects.get(name=request.data.get('lottery'))
+                
+                # Validar si está en horario de apuestas
+                if not lottery.is_open_for_bets():
+                    return Response(
+                        {'error': 'Lotería cerrada para apuestas'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
                 bet_data = request.data.copy()
                 bet_data['draw_date'] = lottery.next_draw_date
 
                 # Validar saldo
                 amount = Decimal(str(bet_data.get('amount')))
-                balance = UserBalance.objects.get(user=request.user)
+                balance = UserBalance.objects.select_for_update().get(user=request.user)
                 if balance.balance < amount:
                     return Response(
                         {
@@ -527,20 +537,16 @@ class BetViewSet(GenericViewSet):
                         },
                         status=status.HTTP_400_BAD_REQUEST
                     )
+
+                # Validar número y serie
+                number = bet_data.get('number')
+                series = bet_data.get('series')
+                fractions = int(amount/lottery.fraction_price)
                 
-                # Validar la apuesta
-                validator = LotteryValidationService(lottery)
-                validation = validator.validate_bet_request(
-                    user=request.user,
-                    number=bet_data.get('number'),
-                    series=bet_data.get('series'),
-                    fractions=bet_data.get('fractions', 1),
-                    amount=amount
-                )
-                
-                if not validation['is_valid']:
+                is_valid, message = lottery.validate_bet(number, series, fractions)
+                if not is_valid:
                     return Response(
-                        {'errors': validation['errors']},
+                        {'error': message},
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
