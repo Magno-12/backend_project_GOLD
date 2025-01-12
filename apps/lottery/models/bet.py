@@ -72,12 +72,12 @@ class Bet(BaseModel):
         verbose_name_plural = 'Apuestas'
         ordering = ['-created_at']
         constraints = [
-            # Solo el número no se puede repetir en la misma lotería y fecha
-            models.UniqueConstraint(
-                fields=['lottery', 'number'],
-                name='unique_lottery_number_date'
-            )
-        ]
+        # Debe incluir también la fecha del sorteo
+        models.UniqueConstraint(
+            fields=['lottery', 'number', 'series', 'draw_date'],
+            name='unique_lottery_number_series_date'
+        )
+    ]
 
     def __str__(self):
         return f"{self.user.get_full_name()} - {self.lottery.name} - {self.number}"

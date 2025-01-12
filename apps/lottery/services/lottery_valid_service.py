@@ -97,6 +97,11 @@ class LotteryValidationService:
         if not is_allowed:
             self.validation_errors.append(message)
 
+        # 10. Validar rango y combinaciones
+        is_valid, message = self.lottery.validate_bet(number, series, fractions)
+        if not is_valid:
+            self.validation_errors.append(message)
+
         return {
             'is_valid': len(self.validation_errors) == 0,
             'errors': self.validation_errors

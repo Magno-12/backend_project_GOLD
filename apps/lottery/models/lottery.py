@@ -1,6 +1,7 @@
 from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.validators import MinValueValidator, MaxValueValidator, RegexValidator
 from django.utils import timezone
+from django.db.models import Sum, F
 from datetime import time, timedelta
 from cloudinary.models import CloudinaryField
 from django.contrib.postgres.fields import ArrayField
@@ -9,10 +10,10 @@ from decimal import Decimal
 from datetime import datetime, time
 
 from apps.default.models.base_model import BaseModel
+from apps.lottery.models.bet import Bet
 
 
 class Lottery(BaseModel):
-    # Constante para los días
     DAYS_CHOICES = [
         ('MONDAY', 'Lunes'),
         ('TUESDAY', 'Martes'),
@@ -22,7 +23,6 @@ class Lottery(BaseModel):
         ('SATURDAY', 'Sábado'),
     ]
 
-    """Modelo principal para las loterías"""
     name = models.CharField('Nombre', max_length=100)
     code = models.CharField('Código', max_length=50, unique=True)
     draw_day = models.CharField(
@@ -46,19 +46,19 @@ class Lottery(BaseModel):
         'Apuesta mínima',
         max_digits=20,
         decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.00'))]
+        validators=[MinValueValidator(Decimal('0'))]
     )
     max_bet_amount = models.DecimalField(
         'Apuesta máxima',
         max_digits=20,
         decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.00'))]
+        validators=[MinValueValidator(Decimal('0'))]
     )
     logo_url = models.URLField('Logo URL', blank=True)
     is_active = models.BooleanField('Activa', default=True)
     requires_series = models.BooleanField('Requiere serie', default=True)
 
-    # Cloudinary files
+    # Campos de archivos
     number_ranges_file = CloudinaryField(
         'Archivo de rangos',
         folder='lottery/ranges/',
@@ -81,10 +81,10 @@ class Lottery(BaseModel):
         blank=True
     )
 
-    # Campos para manejo de sorteos
+    # Campos de sorteo
     closing_time = models.TimeField(
         'Hora límite de compra',
-        default=time(20, 0),  # 8:00 PM por defecto
+        default=time(20, 0),
         help_text='Hora límite para realizar apuestas'
     )
     last_draw_number = models.PositiveIntegerField(
@@ -99,6 +99,40 @@ class Lottery(BaseModel):
         blank=True
     )
 
+    # Nuevos campos de validación
+    number_range_start = models.CharField(
+        'Rango inicial',
+        max_length=4,
+        validators=[
+            RegexValidator(
+                r'^\d{4}$',
+                'Debe ser un número de 4 dígitos'
+            )
+        ],
+        help_text='Número inicial del rango válido'
+    )
+    number_range_end = models.CharField(
+        'Rango final',
+        max_length=4,
+        validators=[
+            RegexValidator(
+                r'^\d{4}$',
+                'Debe ser un número de 4 dígitos'
+            )
+        ],
+        help_text='Número final del rango válido'
+    )
+    allow_duplicate_numbers = models.BooleanField(
+        'Permitir números duplicados en series',
+        default=False,
+        help_text='Si está activo, permite el mismo número en diferentes series'
+    )
+    max_fractions_per_combination = models.PositiveIntegerField(
+        'Máximo fracciones por combinación',
+        default=1,
+        help_text='Máximo de fracciones por combinación número-serie'
+    )
+
     available_series = ArrayField(
         models.CharField(max_length=3),
         verbose_name='Series disponibles',
@@ -107,22 +141,62 @@ class Lottery(BaseModel):
         blank=True
     )
 
-    class Meta:
-        verbose_name = 'Lotería'
-        verbose_name_plural = 'Loterías'
-        ordering = ['name']
+    def validate_number_in_range(self, number: str) -> bool:
+        try:
+            num = int(number)
+            start = int(self.number_range_start)
+            end = int(self.number_range_end)
+            return start <= num <= end
+        except ValueError:
+            return False
 
-    def __str__(self):
-        return self.name
-    
+    def validate_bet(self, number: str, series: str, fractions: int) -> tuple[bool, str]:
+        # Validar rango
+        if not self.validate_number_in_range(number):
+            return False, f"Número fuera del rango permitido ({self.number_range_start}-{self.number_range_end})"
+            
+        # Validar serie disponible
+        if series not in self.available_series:
+            return False, "Serie no disponible para esta lotería"
+
+        if not self.allow_duplicate_numbers:
+            # Validar combinación número-serie-fecha
+            existing_bet = Bet.objects.filter(
+                lottery=self,
+                number=number,
+                series=series,
+                draw_date=self.next_draw_date
+            ).exists()
+            
+            if existing_bet:
+                return False, "Esta combinación número-serie ya existe para este sorteo"
+
+        # Validar fracciones
+        existing_fractions = Bet.objects.filter(
+            lottery=self,
+            number=number,
+            series=series,
+            draw_date=self.next_draw_date
+        ).aggregate(
+            total_fractions=models.Sum(
+                models.F('amount') / models.F('lottery__fraction_price')
+            )
+        )['total_fractions'] or 0
+
+        if existing_fractions + fractions > self.max_fractions_per_combination:
+            return False, f"Máximo {self.max_fractions_per_combination} fracciones por combinación"
+
+        return True, "Apuesta válida"
+
+    def is_open_for_bets(self):
+        now = timezone.now().time()
+        return now < self.closing_time and self.is_active
+
     def save(self, *args, **kwargs):
-        # Solo actualizar sorteo si es una lotería activa
         if self.is_active:
-            # Incrementar automáticamente el número de sorteo
             if not self.pk or 'last_draw_number' in kwargs:
                 self.last_draw_number = (self.last_draw_number or 0) + 1
             
-            # Calcular próxima fecha de sorteo si no existe
             if not self.next_draw_date:
                 today = timezone.now().date()
                 days_ahead = self.get_days_until_next_draw()
@@ -130,82 +204,21 @@ class Lottery(BaseModel):
             
         super().save(*args, **kwargs)
 
-    def get_days_until_next_draw(self):
-        """Calcula días hasta el próximo sorteo"""
-        today = timezone.now().date()
-        current_weekday = today.weekday()
-        
-        # Convertir día de sorteo a número (0-6)
-        draw_weekday = {
-            'MONDAY': 0,
-            'TUESDAY': 1,
-            'WEDNESDAY': 2,
-            'THURSDAY': 3,
-            'FRIDAY': 4,
-            'SATURDAY': 5,
-        }[self.draw_day]
-        
-        days_ahead = draw_weekday - current_weekday
-        if days_ahead <= 0:
-            days_ahead += 7
-        return days_ahead
-
-    def is_open_for_bets(self):
-        """Verifica si la lotería está abierta para apuestas"""
-        now = timezone.now().time()
-        return now < self.closing_time and self.is_active
-    
-    def is_betting_allowed(self) -> tuple[bool, str]:
-        """
-        Verifica si se permiten apuestas en este momento.
-        Retorna una tupla de (permitido, mensaje)
-        """
-        bogota_tz = pytz.timezone('America/Bogota')
-        now = timezone.now().astimezone(bogota_tz)
-        
-        # Convertir draw_day a número (0 = Lunes, 6 = Domingo)
-        day_map = {
-            'MONDAY': 0, 'TUESDAY': 1, 'WEDNESDAY': 2,
-            'THURSDAY': 3, 'FRIDAY': 4, 'SATURDAY': 5
-        }
-        draw_day_num = day_map.get(self.draw_day)
-        current_day = now.weekday()
-
-        # Si no es el día del sorteo
-        if current_day != draw_day_num:
-            return False, "Las apuestas solo se permiten el día del sorteo"
-
-        # Convertir closing_time a datetime de hoy
-        closing_datetime = bogota_tz.localize(
-            datetime.combine(now.date(), self.closing_time)
+    class Meta:
+        verbose_name = 'Lotería'
+        verbose_name_plural = 'Loterías'
+        ordering = ['name']
+        constraints = [
+        # Este constraint no debería estar aquí
+        models.UniqueConstraint(
+            fields=['code', 'name'],
+            name='unique_lottery_code_name'
+        ),
+        models.CheckConstraint(
+            check=models.Q(number_range_start__lte=models.F('number_range_end')),
+            name='valid_number_range'
         )
+    ]
 
-        # Si ya pasó la hora de cierre
-        if now > closing_datetime:
-            next_draw = self.get_next_draw_date()
-            return False, f"Fuera del horario permitido. Próximo sorteo: {next_draw}"
-
-        # Si la lotería está inactiva
-        if not self.is_active:
-            return False, "Esta lotería no está activa actualmente"
-
-        return True, "Apuestas permitidas"
-
-    def get_next_draw_date(self):
-        """Obtiene la fecha del próximo sorteo"""
-        bogota_tz = pytz.timezone('America/Bogota')
-        now = timezone.now().astimezone(bogota_tz)
-        
-        day_map = {
-            'MONDAY': 0, 'TUESDAY': 1, 'WEDNESDAY': 2,
-            'THURSDAY': 3, 'FRIDAY': 4, 'SATURDAY': 5
-        }
-        draw_day_num = day_map.get(self.draw_day)
-        current_day = now.weekday()
-        
-        days_ahead = draw_day_num - current_day
-        if days_ahead <= 0: # Si ya pasó el día esta semana
-            days_ahead += 7
-            
-        next_draw = now.date() + timedelta(days=days_ahead)
-        return next_draw
+    def __str__(self):
+        return self.name

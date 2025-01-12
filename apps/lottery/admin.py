@@ -146,29 +146,35 @@ class LotteryAdmin(admin.ModelAdmin):
 
         lottery = queryset[0]
         try:
-            # Obtener billetes no vendidos
-            unsold_tickets = Bet.objects.filter(
-                lottery=lottery,
-                draw_date=lottery.next_draw_date,
-                status='PENDING'
-            )
-
-            # Crear contenido del archivo
             content = []
+            # Encabezado según formato
             content.append("06")  # Código lotería
-            content.append("0993")  # Código distribuidor
-            content.append(f"{lottery.last_draw_number + 1}")  # Número sorteo
-            content.append(f"{unsold_tickets.count()}")  # Total no vendidos
+            content.append("0993") # Código distribuidor Coinjuegos
+            content.append(f"{str(lottery.last_draw_number + 1):0>4}") # Aseguramos 4 dígitos
+            
+            # Obtener billetes no vendidos
+            unsold_tickets = lottery.bets.filter(
+                status='PENDING',
+                draw_date=lottery.next_draw_date
+            )
+            
+            # Total fracciones devueltas 
+            total_fractions = sum(
+                int(ticket.amount/lottery.fraction_price) 
+                for ticket in unsold_tickets
+            )
+            content.append(f"{total_fractions:0>7}") # Aseguramos 7 dígitos
 
-            # Detalle billetes no vendidos
+            # Detalle de billetes
             for ticket in unsold_tickets:
+                fractions = int(ticket.amount/lottery.fraction_price)
                 line = (
-                    f"{ticket.number:04d}"  # Número
-                    f"{ticket.series:03d}"  # Serie
-                    f"{lottery.fraction_count:03d}"  # Fracciones totales
-                    f"{lottery.fraction_count:02d}"  # Fracciones devueltas
-                    f"001"  # Número paquete
-                    f"01"   # Posición
+                    f"{ticket.number:0>4}"     # NNNN
+                    f"{ticket.series:0>3}"     # SSS
+                    f"{fractions:0>3}"         # FFF
+                    f"{fractions:0>2}"         # ##
+                    f"001"                     # QQQ
+                    f"01"                      # PP
                 )
                 content.append(line)
 
