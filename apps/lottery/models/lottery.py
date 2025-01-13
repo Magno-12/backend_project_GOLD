@@ -151,10 +151,14 @@ class Lottery(BaseModel):
             return False
 
     def validate_bet(self, number: str, series: str, fractions: int) -> tuple[bool, str]:
-        # Validar rango
-        if not self.validate_number_in_range(number):
-            return False, f"Número fuera del rango permitido ({self.number_range_start}-{self.number_range_end})"
-            
+        # Validar que el número esté en el rango 0000-9999
+        try:
+            num_int = int(number)
+            if not (0 <= num_int <= 9999):
+                return False, "Número fuera del rango permitido (0000-9999)"
+        except ValueError:
+            return False, "Número inválido"
+        
         # Validar serie disponible
         if series not in self.available_series:
             return False, "Serie no disponible para esta lotería"
