@@ -36,8 +36,8 @@ class LotteryResultViewSet(GenericViewSet):
         """Obtener y actualizar resultados de loterías"""
         try:
             response = requests.get(
-                'https://bsorh1cl1f.execute-api.us-east-1.amazonaws.com/dev/',
-                headers={'x-api-key': 'C7YHRNx2f04lI1hDWELJ1ajl48FP4ynu17oqN6v0'}
+                'https://lottery-results-api.onrender.com/results',
+                headers={'x-api-key': '47SFw0COzXcwePfecOUwWUXe9BrZhg'}
             )
 
             if response.status_code == 200:

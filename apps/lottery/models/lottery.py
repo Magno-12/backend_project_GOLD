@@ -151,33 +151,28 @@ class Lottery(BaseModel):
             return False
 
     def validate_bet(self, number: str, series: str, fractions: int) -> tuple[bool, str]:
-        # Validar que el número esté en el rango 0000-9999
-        try:
-            num_int = int(number)
-            if not (0 <= num_int <= 9999):
-                return False, "Número fuera del rango permitido (0000-9999)"
-        except ValueError:
-            return False, "Número inválido"
-        
+        # Validar rango
+        if not self.validate_number_in_range(number):
+            return False, f"Número fuera del rango permitido ({self.number_range_start}-{self.number_range_end})"
+            
         # Validar serie disponible
-        if series not in self.available_series:
+        if self.requires_series and series not in self.available_series:
             return False, "Serie no disponible para esta lotería"
 
-        if not self.allow_duplicate_numbers:
-            # Validar combinación número-serie-fecha
-            existing_bet = Bet.objects.filter(
-                lottery=self,
-                number=number,
-                series=series,
-                draw_date=self.next_draw_date
-            ).exists()
-            
-            if existing_bet:
-                return False, "Esta combinación número-serie ya existe para este sorteo"
+        # Validar combinación número-serie SOLO en esta lotería
+        existing_bet = Bet.objects.filter(
+            lottery=self,  # Solo en esta lotería
+            number=number,
+            series=series,
+            draw_date=self.next_draw_date
+        ).exists()
+        
+        if existing_bet:
+            return False, "Esta combinación número-serie ya existe para esta lotería"
 
-        # Validar fracciones
+        # Validar fracciones para esta combinación
         existing_fractions = Bet.objects.filter(
-            lottery=self,
+            lottery=self,  # Solo en esta lotería
             number=number,
             series=series,
             draw_date=self.next_draw_date
@@ -191,6 +186,26 @@ class Lottery(BaseModel):
             return False, f"Máximo {self.max_fractions_per_combination} fracciones por combinación"
 
         return True, "Apuesta válida"
+
+    def get_days_until_next_draw(self):
+        """Calcula días hasta el próximo sorteo"""
+        today = timezone.now().date()
+        current_weekday = today.weekday()
+
+        # Convertir día de sorteo a número (0-6)
+        draw_weekday = {
+            'MONDAY': 0,
+            'TUESDAY': 1,
+            'WEDNESDAY': 2,
+            'THURSDAY': 3,
+            'FRIDAY': 4,
+            'SATURDAY': 5,
+        }[self.draw_day]
+
+        days_ahead = draw_weekday - current_weekday
+        if days_ahead <= 0:  # Si ya pasó el día esta semana
+            days_ahead += 7
+        return days_ahead
 
     def is_open_for_bets(self):
         now = timezone.now().time()
