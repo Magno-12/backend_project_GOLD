@@ -163,38 +163,34 @@ class Lottery(BaseModel):
             return False
 
     def validate_bet(self, number: str, series: str, fractions: int) -> tuple[bool, str]:
-        # Validar rango
-        if not self.validate_number_in_range(number):
-            return False, f"Número fuera del rango permitido ({self.number_range_start}-{self.number_range_end})"
-            
-        # Validar serie disponible
-        if self.requires_series and series not in self.available_series:
-            return False, "Serie no disponible para esta lotería"
+        """Valida una apuesta para esta lotería específica"""
+        # 1. Validar que el número está en el rango correcto (0000-9999)
+        try:
+            num = int(number)
+            if not (0 <= num <= 9999):
+                return False, f"El número debe estar entre 0000 y 9999"
+        except ValueError:
+            return False, "El número debe ser un valor numérico de 4 dígitos"
 
-        # Validar combinación número-serie SOLO en esta lotería
+        # 2. Si la lotería requiere series, validar que la serie exista en las disponibles
+        if self.requires_series and self.available_series:
+            if series not in self.available_series:
+                return False, f"Serie {series} no disponible para esta lotería"
+
+        # 3. Validar que esta combinación número-serie no esté ya apostada para el próximo sorteo
         existing_bet = Bet.objects.filter(
-            lottery=self,  # Solo en esta lotería
+            lottery=self,
             number=number,
             series=series,
-            draw_date=self.next_draw_date
+            draw_date=self.next_draw_date,
+            status='PENDING'  # Solo considerar apuestas pendientes
         ).exists()
         
         if existing_bet:
-            return False, "Esta combinación número-serie ya existe para esta lotería"
+            return False, "Esta combinación número-serie ya está apostada para el próximo sorteo"
 
-        # Validar fracciones para esta combinación
-        existing_fractions = Bet.objects.filter(
-            lottery=self,  # Solo en esta lotería
-            number=number,
-            series=series,
-            draw_date=self.next_draw_date
-        ).aggregate(
-            total_fractions=models.Sum(
-                models.F('amount') / models.F('lottery__fraction_price')
-            )
-        )['total_fractions'] or 0
-
-        if existing_fractions + fractions > self.max_fractions_per_combination:
+        # 4. Validar el número de fracciones
+        if fractions > self.max_fractions_per_combination:
             return False, f"Máximo {self.max_fractions_per_combination} fracciones por combinación"
 
         return True, "Apuesta válida"
