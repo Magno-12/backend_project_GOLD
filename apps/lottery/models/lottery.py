@@ -200,12 +200,14 @@ class Lottery(BaseModel):
         return True, "Apuesta válida"
 
     def get_days_until_next_draw(self):
-        """Calcula días hasta el próximo sorteo"""
-        today = timezone.now().date()
-        current_weekday = today.weekday()
-        current_time = timezone.now().time()
+        """Calcula la próxima fecha de sorteo"""
+        # Usar zona horaria de Colombia
+        bogota_tz = pytz.timezone('America/Bogota')
+        now = timezone.now().astimezone(bogota_tz)
+        today = now.date()
+        current_time = now.time()
 
-        # Convertir día de sorteo a número (0-6)
+        # Mapear días de la semana
         draw_weekday = {
             'MONDAY': 0,
             'TUESDAY': 1,
@@ -215,21 +217,46 @@ class Lottery(BaseModel):
             'SATURDAY': 5,
         }[self.draw_day]
 
+        current_weekday = today.weekday()
         days_ahead = draw_weekday - current_weekday
 
-        # Si estamos en el día del sorteo pero ya pasó la hora de cierre
-        if days_ahead == 0 and current_time >= self.closing_time:
-            days_ahead = 7
-        # Si ya pasó el día esta semana
-        elif days_ahead <= 0:
+        # Si es el mismo día pero no ha pasado la hora de cierre, usar la fecha actual
+        if days_ahead == 0 and current_time < self.closing_time:
+            return today
+        
+        # Si ya pasó la hora de cierre o es otro día
+        if days_ahead <= 0:
             days_ahead += 7
 
-        next_draw = today + timedelta(days=days_ahead)
-        return next_draw
+        return today + timedelta(days=days_ahead)
 
     def is_open_for_bets(self):
-        now = timezone.now().time()
-        return now < self.closing_time and self.is_active
+        """Verifica si la lotería está abierta para apuestas"""
+        # Verificar si la lotería está activa
+        if not self.is_active:
+            return False
+
+        # Obtener la hora actual en la zona horaria de Colombia
+        bogota_tz = pytz.timezone('America/Bogota')
+        now = timezone.now().astimezone(bogota_tz)
+        
+        # Obtener el día actual
+        current_day = now.strftime('%A').upper()
+        day_mapping = {
+            'MONDAY': 'MONDAY',
+            'TUESDAY': 'TUESDAY',
+            'WEDNESDAY': 'WEDNESDAY',
+            'THURSDAY': 'THURSDAY',
+            'FRIDAY': 'FRIDAY',
+            'SATURDAY': 'SATURDAY'
+        }
+        
+        # Verificar si es el día correcto
+        if self.draw_day != day_mapping.get(current_day):
+            return True  # Si no es el día del sorteo, permite apostar
+            
+        # Si es el día del sorteo, verificar la hora
+        return now.time() < self.closing_time
 
     def save(self, *args, **kwargs):
         if self.is_active:
