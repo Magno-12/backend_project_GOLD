@@ -22,7 +22,19 @@ class Lottery(BaseModel):
         ('FRIDAY', 'Viernes'),
         ('SATURDAY', 'Sábado'),
     ]
-
+    series = models.CharField(
+        'Serie por defecto',
+        max_length=3,
+        validators=[
+            RegexValidator(
+                r'^\d{3}$',
+                'Debe ser una serie de 3 dígitos'
+            )
+        ],
+        default='000',
+        null=True,
+        blank=True
+    )
     name = models.CharField('Nombre', max_length=100)
     code = models.CharField('Código', max_length=50, unique=True)
     draw_day = models.CharField(
@@ -142,11 +154,11 @@ class Lottery(BaseModel):
     )
 
     def validate_number_in_range(self, number: str) -> bool:
+        """Valifica si el número está dentro del rango permitido"""
         try:
             num = int(number)
-            start = int(self.number_range_start)
-            end = int(self.number_range_end)
-            return start <= num <= end
+            # Aseguramos que el número esté entre 0000 y 9999
+            return 0 <= num <= 9999
         except ValueError:
             return False
 

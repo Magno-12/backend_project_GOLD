@@ -1,6 +1,7 @@
 import requests
 from datetime import time, datetime, timedelta
 from django.utils import timezone
+from django.conf import settings
 
 from rest_framework import status
 from rest_framework.viewsets import GenericViewSet
@@ -35,62 +36,101 @@ class LotteryResultViewSet(GenericViewSet):
     def get_result(self, request):
         """Obtener y actualizar resultados de loterías"""
         try:
+            print("Intentando obtener resultados...")
             response = requests.get(
-                'https://lottery-results-api.onrender.com/results',
-                headers={'x-api-key': '47SFw0COzXcwePfecOUwWUXe9BrZhg'}
+                'https://bsorh1cl1f.execute-api.us-east-1.amazonaws.com/dev/',
+                headers={'x-api-key': 'C7YHRNx2f04lI1hDWELJ1ajl48FP4ynu17oqN6v0'},
+                timeout=10
             )
+            print(f"Status code: {response.status_code}")
+            print(f"Response content: {response.content}")
 
-            if response.status_code == 200:
-                results = response.json()
-                saved_results = []
+            if not response.ok:
+                print(f"Error en la respuesta: {response.status_code}")
+                return Response(
+                    {"error": "Error al obtener resultados", "detail": response.text},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-                for result in results:
-                    try:
-                        lottery, _ = Lottery.objects.get_or_create(
-                            name=result['nombre'],
-                            defaults={
-                                'code': result['nombre'].replace(' ', '_').upper(),
-                                'draw_day': 'MONDAY',
-                                'draw_time': time(22, 30),
-                                'fraction_count': 3,
-                                'fraction_price': Decimal('5000'),
-                                'is_active': True,
-                                'major_prize_amount': Decimal('1000000000'),
-                                'min_bet_amount': Decimal('5000'),
-                                'max_bet_amount': Decimal('1000000000')
-                            }
-                        )
+            results = response.json()
+            print(f"Resultados obtenidos: {results}")
+            saved_results = []
 
-                        lottery_result, created = LotteryResult.objects.update_or_create(
-                            lottery=lottery,
-                            fecha=result['fecha'],
-                            defaults={
-                                'numero': result['resultado'],
-                                'numero_serie': result['serie'],
-                                'premios_secos': result.get('secos', [])  # JSON directo
-                            }
-                        )
+            for result in results:
+                try:
+                    print(f"Procesando resultado: {result}")
+                    lottery, created = Lottery.objects.get_or_create(
+                        name=result['nombre'],
+                        defaults={
+                            'code': result['nombre'].replace(' ', '_').upper(),
+                            'draw_day': 'MONDAY',
+                            'draw_time': time(22, 30),
+                            'fraction_count': 3,
+                            'fraction_price': Decimal('5000'),
+                            'is_active': True,
+                            'major_prize_amount': Decimal('1000000000'),
+                            'min_bet_amount': Decimal('5000'),
+                            'max_bet_amount': Decimal('1000000000'),
+                            'number_range_start': '0000',
+                            'number_range_end': '9999',
+                            'max_fractions_per_combination': 1,
+                            'available_series': ['000', '001', '002']
+                        }
+                    )
+                    print(f"Lotería {'creada' if created else 'encontrada'}: {lottery.name}")
 
-                        saved_results.append(lottery_result)
+                    lottery_result, created = LotteryResult.objects.update_or_create(
+                        lottery=lottery,
+                        fecha=result['fecha'],
+                        defaults={
+                            'numero': result['resultado'],
+                            'numero_serie': result['serie'],
+                            'premios_secos': result.get('secos', [])
+                        }
+                    )
+                    print(f"Resultado {'creado' if created else 'actualizado'} para {lottery.name}")
 
-                    except Exception as e:
-                        print(f"Error procesando {result['nombre']}: {str(e)}")
-                        continue
+                    # Si el resultado es nuevo, procesar ganadores
+                    if created:
+                        try:
+                            winner_service = LotteryWinnerService(lottery_result)
+                            winner_service.process_results()
+                            print(f"Ganadores procesados para {lottery.name}")
+                        except Exception as e:
+                            print(f"Error procesando ganadores de {lottery.name}: {str(e)}")
 
-                serializer = LotteryResultSerializer(saved_results, many=True)
-                return Response({
-                    'message': f"Procesados {len(saved_results)} resultados",
-                    'processed_results': serializer.data
-                })
+                    saved_results.append(lottery_result)
 
+                except Exception as e:
+                    print(f"Error procesando {result.get('nombre', 'lotería desconocida')}: {str(e)}")
+                    import traceback
+                    print(f"Traceback: {traceback.format_exc()}")
+                    continue
+
+            if not saved_results:
+                return Response(
+                    {"message": "No se procesaron resultados", "details": "No se encontraron resultados válidos"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            serializer = LotteryResultSerializer(saved_results, many=True)
+            return Response({
+                'message': f"Procesados {len(saved_results)} resultados",
+                'processed_results': serializer.data
+            })
+
+        except requests.RequestException as e:
+            print(f"Error en la petición HTTP: {str(e)}")
             return Response(
-                {"error": "No se pudieron obtener los resultados"},
+                {"error": "Error en la conexión con el servicio de resultados", "detail": str(e)},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
-
         except Exception as e:
+            print(f"Error inesperado: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
             return Response(
-                {"error": str(e)},
+                {"error": "Error interno del servidor", "detail": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
