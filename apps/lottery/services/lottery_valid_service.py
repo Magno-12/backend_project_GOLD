@@ -15,13 +15,20 @@ class LotteryValidationService:
 
     def validate_number_availability(self, number: str, series: str) -> bool:
         """Valida disponibilidad de número en serie"""
-        return not Bet.objects.filter(
+        # Si la lotería permite números duplicados en diferentes series
+        if self.lottery.allow_duplicate_numbers:
+            return True
+            
+        # Si no permite duplicados, verificar la combinación exacta
+        existing_bet = Bet.objects.filter(
             lottery=self.lottery,
             number=number,
-            series=series,
+            series=series,  # La serie específica
             draw_date=self.lottery.next_draw_date,
             status='PENDING'
         ).exists()
+        
+        return not existing_bet
 
     def get_available_numbers(self, series: str) -> List[str]:
         """Obtiene números disponibles en una serie"""
