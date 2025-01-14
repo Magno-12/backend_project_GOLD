@@ -430,19 +430,23 @@ class BetViewSet(GenericViewSet):
 
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def create_bet(self, request):
-        logger.debug(f"Data recibida: {request.data}")
         """Crear apuestas múltiples o individual"""
+        logger.debug(f"Data recibida: {request.data}")
         
         try:
             with transaction.atomic():
                 # Verificar si es una lista de apuestas o una sola
                 if isinstance(request.data, list):
+                    logger.debug("Procesando lista de apuestas")
                     # Validar el total de todas las apuestas
                     total_amount = sum(Decimal(str(bet.get('amount', 0))) for bet in request.data)
+                    logger.debug(f"Monto total de apuestas: {total_amount}")
                     
                     try:
                         balance = UserBalance.objects.select_for_update().get(user=request.user)
+                        logger.debug(f"Saldo disponible: {balance.balance}")
                         if balance.balance < total_amount:
+                            logger.error(f"Saldo insuficiente. Requerido: {total_amount}, Disponible: {balance.balance}")
                             return Response(
                                 {
                                     'error': 'Saldo insuficiente para todas las apuestas',
@@ -452,6 +456,7 @@ class BetViewSet(GenericViewSet):
                                 status=status.HTTP_400_BAD_REQUEST
                             )
                     except UserBalance.DoesNotExist:
+                        logger.error("Usuario sin saldo disponible")
                         return Response(
                             {'error': 'Usuario no tiene saldo disponible'},
                             status=status.HTTP_400_BAD_REQUEST
@@ -463,11 +468,16 @@ class BetViewSet(GenericViewSet):
                     # Procesar cada apuesta
                     for bet_data in request.data:
                         try:
+                            logger.debug(f"Procesando apuesta: {bet_data}")
                             # Obtener la lotería 
                             lottery = Lottery.objects.get(name=bet_data.get('lottery'))
+                            logger.debug(f"Lotería encontrada: {lottery.name}")
                             
                             # Validar si está en horario de apuestas
-                            if not lottery.is_open_for_bets():
+                            is_open = lottery.is_open_for_bets()
+                            logger.debug(f"¿Lotería abierta para apuestas?: {is_open}")
+                            if not is_open:
+                                logger.warning(f"Lotería cerrada. Hora actual: {timezone.now()}, Hora cierre: {lottery.closing_time}")
                                 validation_errors.append({
                                     'bet_data': bet_data,
                                     'errors': ['Lotería cerrada para apuestas']
@@ -476,14 +486,17 @@ class BetViewSet(GenericViewSet):
 
                             # Obtener la próxima fecha de sorteo
                             next_draw_date = lottery.get_days_until_next_draw()
+                            logger.debug(f"Próxima fecha de sorteo: {next_draw_date}")
                             bet_data['draw_date'] = next_draw_date
 
                             number = bet_data.get('number')
                             series = bet_data.get('series')
                             fractions = bet_data.get('fractions', 1)
+                            logger.debug(f"Detalles apuesta - Número: {number}, Serie: {series}, Fracciones: {fractions}")
 
                             # Validar rango y combinación número-serie
                             is_valid, message = lottery.validate_bet(number, series, fractions)
+                            logger.debug(f"Validación de apuesta: {is_valid} - {message}")
                             if not is_valid:
                                 validation_errors.append({
                                     'bet_data': bet_data,
@@ -493,22 +506,26 @@ class BetViewSet(GenericViewSet):
 
                             serializer = self.get_serializer(data=bet_data)
                             if serializer.is_valid():
+                                logger.debug("Serializer válido")
                                 serializers.append({
                                     'serializer': serializer,
                                     'lottery': lottery,
                                     'validation': {'is_valid': True}
                                 })
                             else:
+                                logger.error(f"Error en serializer: {serializer.errors}")
                                 validation_errors.append({
                                     'bet_data': bet_data,
                                     'errors': serializer.errors
                                 })
                         except Lottery.DoesNotExist:
+                            logger.error(f"Lotería no encontrada: {bet_data.get('lottery')}")
                             validation_errors.append({
                                 'bet_data': bet_data,
                                 'errors': ['Lotería no encontrada']
                             })
                         except Exception as e:
+                            logger.error(f"Error inesperado procesando apuesta: {str(e)}")
                             validation_errors.append({
                                 'bet_data': bet_data,
                                 'errors': [str(e)]
@@ -516,6 +533,7 @@ class BetViewSet(GenericViewSet):
 
                     # Si hay errores de validación, retornarlos
                     if validation_errors:
+                        logger.error(f"Errores de validación encontrados: {validation_errors}")
                         return Response(
                             {
                                 'error': 'Errores de validación en algunas apuestas',
@@ -526,10 +544,12 @@ class BetViewSet(GenericViewSet):
                         
                     # Si todas las apuestas son válidas, guardarlas
                     created_bets = []
+                    logger.debug("Iniciando guardado de apuestas")
                     
                     # Actualizar saldo del usuario primero
                     balance.balance -= total_amount
                     balance.save()
+                    logger.debug(f"Saldo actualizado: {balance.balance}")
 
                     for data in serializers:
                         bet = data['serializer'].save(
@@ -538,8 +558,10 @@ class BetViewSet(GenericViewSet):
                             status='PENDING'
                         )
                         created_bets.append(bet)
+                        logger.debug(f"Apuesta creada: {bet.id}")
                     
                     response_serializer = self.get_serializer(created_bets, many=True)
+                    logger.debug("Proceso completado exitosamente")
                     return Response(
                         {
                             'message': 'Apuestas creadas exitosamente',
@@ -552,11 +574,14 @@ class BetViewSet(GenericViewSet):
                 
                 # Si es una sola apuesta
                 else:
+                    logger.debug("Procesando apuesta individual")
                     try:
                         lottery = Lottery.objects.get(name=request.data.get('lottery'))
+                        logger.debug(f"Lotería encontrada: {lottery.name}")
                         
                         # Validar si está en horario de apuestas
                         if not lottery.is_open_for_bets():
+                            logger.warning(f"Lotería cerrada. Hora actual: {timezone.now()}, Hora cierre: {lottery.closing_time}")
                             return Response(
                                 {'error': 'Lotería cerrada para apuestas'},
                                 status=status.HTTP_400_BAD_REQUEST
@@ -566,10 +591,12 @@ class BetViewSet(GenericViewSet):
                         # Obtener la próxima fecha de sorteo
                         next_draw_date = lottery.get_days_until_next_draw()
                         bet_data['draw_date'] = next_draw_date
+                        logger.debug(f"Próxima fecha de sorteo: {next_draw_date}")
 
                         # Validar saldo
                         amount = Decimal(str(bet_data.get('amount')))
                         balance = UserBalance.objects.select_for_update().get(user=request.user)
+                        logger.debug(f"Validando saldo - Requerido: {amount}, Disponible: {balance.balance}")
                         if balance.balance < amount:
                             return Response(
                                 {
@@ -584,8 +611,10 @@ class BetViewSet(GenericViewSet):
                         number = bet_data.get('number')
                         series = bet_data.get('series')
                         fractions = int(amount/lottery.fraction_price)
+                        logger.debug(f"Detalles apuesta - Número: {number}, Serie: {series}, Fracciones: {fractions}")
                         
                         is_valid, message = lottery.validate_bet(number, series, fractions)
+                        logger.debug(f"Validación de apuesta: {is_valid} - {message}")
                         if not is_valid:
                             return Response(
                                 {'error': message},
@@ -594,9 +623,11 @@ class BetViewSet(GenericViewSet):
 
                         serializer = self.get_serializer(data=bet_data)
                         if serializer.is_valid():
+                            logger.debug("Serializer válido")
                             # Actualizar saldo
                             balance.balance -= amount
                             balance.save()
+                            logger.debug(f"Saldo actualizado: {balance.balance}")
 
                             # Crear apuesta
                             bet = serializer.save(
@@ -604,6 +635,7 @@ class BetViewSet(GenericViewSet):
                                 lottery=lottery,
                                 status='PENDING'
                             )
+                            logger.debug(f"Apuesta creada: {bet.id}")
                             
                             return Response(
                                 {
@@ -614,27 +646,30 @@ class BetViewSet(GenericViewSet):
                                 }, 
                                 status=status.HTTP_201_CREATED
                             )
+                        logger.error(f"Error en serializer: {serializer.errors}")
                         return Response(
                             serializer.errors, 
                             status=status.HTTP_400_BAD_REQUEST
                         )
                         
                     except Lottery.DoesNotExist:
+                        logger.error(f"Lotería no encontrada: {request.data.get('lottery')}")
                         return Response(
                             {'error': 'Lotería no encontrada'},
                             status=status.HTTP_404_NOT_FOUND
                         )
                     except UserBalance.DoesNotExist:
+                        logger.error("Usuario sin saldo disponible")
                         return Response(
                             {'error': 'Usuario no tiene saldo disponible'},
                             status=status.HTTP_400_BAD_REQUEST
                         )
 
         except Exception as e:
-            print(f"Error inesperado: {str(e)}")  # Debug error
-            print(f"Tipo de error: {type(e)}")  # Debug tipo de error
+            logger.error(f"Error inesperado: {str(e)}")
+            logger.error(f"Tipo de error: {type(e)}")
             import traceback
-            print(f"Traceback completo: {traceback.format_exc()}")  # Debug traceback
+            logger.error(f"Traceback completo: {traceback.format_exc()}")
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
