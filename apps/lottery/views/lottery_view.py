@@ -474,7 +474,10 @@ class BetViewSet(GenericViewSet):
                                 })
                                 continue
 
-                            bet_data['draw_date'] = lottery.next_draw_date
+                            # Obtener la próxima fecha de sorteo
+                            next_draw_date = lottery.get_days_until_next_draw()
+                            bet_data['draw_date'] = next_draw_date
+
                             number = bet_data.get('number')
                             series = bet_data.get('series')
                             fractions = bet_data.get('fractions', 1)
@@ -560,7 +563,9 @@ class BetViewSet(GenericViewSet):
                             )
 
                         bet_data = request.data.copy()
-                        bet_data['draw_date'] = lottery.next_draw_date
+                        # Obtener la próxima fecha de sorteo
+                        next_draw_date = lottery.get_days_until_next_draw()
+                        bet_data['draw_date'] = next_draw_date
 
                         # Validar saldo
                         amount = Decimal(str(bet_data.get('amount')))
@@ -741,17 +746,18 @@ class BetViewSet(GenericViewSet):
             except Exception as e:
                 print(f"Error procesando resultados: {str(e)}")
 
-            # Ahora obtener las ganancias actualizadas
+            # Ahora obtener solo las ganancias confirmadas (status = 'WON')
             start_date = timezone.now() - timedelta(days=30)
             
             winning_bets = Bet.objects.filter(
                 user=request.user,
-                created_at__gte=start_date
+                created_at__gte=start_date,
+                status='WON'  # Solo apuestas ganadoras
             ).select_related('lottery').order_by('-created_at')[:10]
 
             # Calcular resumen
             summary = {
-                'total_ganado': sum(bet.won_amount for bet in winning_bets if bet.status == 'WON'),
+                'total_ganado': sum(bet.won_amount for bet in winning_bets),
                 'total_apostado': Bet.objects.filter(
                     user=request.user,
                     created_at__gte=start_date
@@ -765,9 +771,8 @@ class BetViewSet(GenericViewSet):
                     'lottery_name': bet.lottery.name,
                     'number': bet.number,
                     'amount_won': str(bet.won_amount),
-                    'status': bet.status,  # Agregamos el estado
                     'draw_date': bet.draw_date,
-                    'prize_details': bet.winning_details.get('prizes', []) if bet.status == 'WON' else []
+                    'prize_details': bet.winning_details.get('prizes', [])
                 } for bet in winning_bets]
             }
 

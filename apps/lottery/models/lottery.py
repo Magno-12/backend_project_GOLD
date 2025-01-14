@@ -203,6 +203,7 @@ class Lottery(BaseModel):
         """Calcula días hasta el próximo sorteo"""
         today = timezone.now().date()
         current_weekday = today.weekday()
+        current_time = timezone.now().time()
 
         # Convertir día de sorteo a número (0-6)
         draw_weekday = {
@@ -215,9 +216,16 @@ class Lottery(BaseModel):
         }[self.draw_day]
 
         days_ahead = draw_weekday - current_weekday
-        if days_ahead <= 0:  # Si ya pasó el día esta semana
+
+        # Si estamos en el día del sorteo pero ya pasó la hora de cierre
+        if days_ahead == 0 and current_time >= self.closing_time:
+            days_ahead = 7
+        # Si ya pasó el día esta semana
+        elif days_ahead <= 0:
             days_ahead += 7
-        return days_ahead
+
+        next_draw = today + timedelta(days=days_ahead)
+        return next_draw
 
     def is_open_for_bets(self):
         now = timezone.now().time()
@@ -228,11 +236,10 @@ class Lottery(BaseModel):
             if not self.pk or 'last_draw_number' in kwargs:
                 self.last_draw_number = (self.last_draw_number or 0) + 1
             
-            if not self.next_draw_date:
-                today = timezone.now().date()
-                days_ahead = self.get_days_until_next_draw()
-                self.next_draw_date = today + timedelta(days=days_ahead)
-            
+            # Actualizar next_draw_date cada vez que se guarda
+            if not self.next_draw_date or timezone.now().date() >= self.next_draw_date:
+                self.next_draw_date = self.get_days_until_next_draw()
+                
         super().save(*args, **kwargs)
 
     class Meta:
