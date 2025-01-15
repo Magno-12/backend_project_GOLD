@@ -2,6 +2,9 @@ from typing import Dict, List, Optional
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LotteryWinnerService:
@@ -33,22 +36,21 @@ class LotteryWinnerService:
             self.process_bet(bet)
 
     def process_bet(self, bet: 'Bet'):
-        """Procesa una apuesta individual y determina todos sus premios posibles"""
-        print(f"Procesando apuesta {bet.id}: {bet.number}-{bet.series}")
-        
+        logger.info(f"Procesando apuesta {bet.id} para lotería {bet.lottery.name}")
         winning_details = self.check_all_prizes(bet)
         
         if winning_details['total_amount'] > 0:
+            logger.info(f"Apuesta {bet.id} ganadora. Monto: {winning_details['total_amount']}")
             bet.status = 'WON'
             bet.won_amount = winning_details['total_amount']
             bet.winning_details = winning_details
-            print(f"¡Apuesta ganadora! Monto: {bet.won_amount}")
         else:
+            logger.info(f"Apuesta {bet.id} no ganadora")
             bet.status = 'LOST'
             bet.won_amount = Decimal('0')
-            print("Apuesta no ganadora")
         
         bet.save()
+        logger.info(f"Apuesta {bet.id} actualizada con estado {bet.status}")
 
     def check_all_prizes(self, bet: 'Bet') -> Dict:
         """Verifica todos los tipos de premios posibles para una apuesta"""
@@ -122,27 +124,42 @@ class LotteryWinnerService:
         return None
 
     def check_seco_prizes(self, bet: 'Bet') -> List[Dict]:
-        """Verifica todos los premios secos posibles"""
         seco_prizes = []
         
-        # Obtener premios secos del plan
+        # Validar que premios_secos sea una lista
+        if not isinstance(self.premios_secos, list):
+            return []
+
+        # Iterar sobre premios secos del plan
         plan_secos = self.prize_plan.prizes.filter(
             prize_type__code='SECO'
         ).select_related('prize_type')
 
-        for prize in plan_secos:
-            # Verificar coincidencia con número y serie si aplica
-            if self.check_seco_match(bet, prize):
-                seco_prizes.append({
-                    'type': 'SECO',
-                    'name': prize.name or 'Premio Seco',
-                    'amount': str(self.calculate_prize_amount(bet, prize)),
-                    'match_type': 'Premio Seco',
-                    'details': {
-                        'number': bet.number,
-                        'series': bet.series if prize.prize_type.requires_series else None
-                    }
-                })
+        for premio_seco in self.premios_secos:
+            # Validar estructura del premio seco
+            if not isinstance(premio_seco, dict):
+                continue
+                
+            numero = premio_seco.get('numero')
+            serie = premio_seco.get('serie')
+            
+            if not (numero and serie):
+                continue
+
+            if bet.number == numero and bet.series == serie:
+                # Encontrar el premio correspondiente en el plan
+                for prize in plan_secos:
+                    seco_prizes.append({
+                        'type': 'SECO',
+                        'name': prize.name or 'Premio Seco',
+                        'amount': str(self.calculate_prize_amount(bet, prize)),
+                        'match_type': 'Premio Seco',
+                        'details': {
+                            'number': bet.number,
+                            'series': bet.series
+                        }
+                    })
+                    break
 
         return seco_prizes
 
@@ -293,9 +310,30 @@ class LotteryWinnerService:
         return False
 
     def calculate_prize_amount(self, bet: 'Bet', prize: 'Prize') -> Decimal:
-        """Calcula monto del premio basado en la apuesta y fracciones"""
-        fraction_ratio = Decimal(bet.amount) / self.lottery.fraction_price
-        return prize.fraction_amount * fraction_ratio
+        try:
+            # Validar que los valores no sean None o 0
+            if not bet.amount or not self.lottery.fraction_price or not prize.fraction_amount:
+                logger.error(f"Valores inválidos para cálculo de premio: amount={bet.amount}, "
+                            f"fraction_price={self.lottery.fraction_price}, "
+                            f"fraction_amount={prize.fraction_amount}")
+                return Decimal('0')
+                
+            # Validar que fraction_price no sea 0
+            if self.lottery.fraction_price == 0:
+                logger.error("Precio de fracción es 0, no se puede calcular el premio")
+                return Decimal('0')
+
+            fraction_ratio = Decimal(str(bet.amount)) / Decimal(str(self.lottery.fraction_price))
+            prize_amount = Decimal(str(prize.fraction_amount)) * fraction_ratio
+            
+            logger.info(f"Cálculo de premio: {bet.amount} / {self.lottery.fraction_price} = {fraction_ratio} * "
+                    f"{prize.fraction_amount} = {prize_amount}")
+            
+            return prize_amount
+            
+        except (TypeError, ValueError, ZeroDivisionError) as e:
+            logger.error(f"Error calculando premio para apuesta {bet.id}: {str(e)}")
+            return Decimal('0')
 
     def get_matched_positions(self, number1: str, number2: str) -> List[int]:
         """Obtiene las posiciones coincidentes entre dos números"""
