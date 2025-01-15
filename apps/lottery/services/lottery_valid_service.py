@@ -137,7 +137,7 @@ class LotteryValidationService:
         """Valida cantidad de fracciones"""
         return (
             isinstance(fractions, int) and 
-            1 <= fractions <= self.lottery.fraction_count
+            1 <= fractions <= self.lottery.max_fractions_per_combination
         )
 
     def validate_bet_amount(self, amount: Decimal, fractions: int) -> bool:

@@ -142,7 +142,8 @@ class Lottery(BaseModel):
     max_fractions_per_combination = models.PositiveIntegerField(
         'Máximo fracciones por combinación',
         default=1,
-        help_text='Máximo de fracciones por combinación número-serie'
+        validators=[MinValueValidator(1)],
+        help_text='Máximo de fracciones que un usuario puede comprar por combinación número-serie'
     )
 
     available_series = ArrayField(

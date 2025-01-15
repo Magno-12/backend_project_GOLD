@@ -786,16 +786,13 @@ class BetViewSet(GenericViewSet):
             
             winning_bets = Bet.objects.filter(
                 user=request.user,
-                created_at__gte=start_date,
-                status='WON'  # Solo apuestas ganadoras
+                status='WON'
             ).select_related('lottery').order_by('-created_at')[:10]
 
-            # Calcular resumen
             summary = {
                 'total_ganado': sum(bet.won_amount for bet in winning_bets),
                 'total_apostado': Bet.objects.filter(
-                    user=request.user,
-                    created_at__gte=start_date
+                    user=request.user
                 ).count(),
                 'ultima_actualizacion': timezone.now()
             }
@@ -815,6 +812,8 @@ class BetViewSet(GenericViewSet):
 
         except Exception as e:
             print(f"Error en user_ganancias: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR

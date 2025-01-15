@@ -41,7 +41,8 @@ class LotteryAdmin(admin.ModelAdmin):
         }),
         ('Configuración de Fracciones', {
             'fields': (
-                'fraction_count', 'fraction_price', 'major_prize_amount'
+                'fraction_count', 'fraction_price', 'major_prize_amount',
+                'max_fractions_per_combination'
             )
         }),
         ('Límites de Apuestas', {
