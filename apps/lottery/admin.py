@@ -26,7 +26,6 @@ class LotteryAdmin(admin.ModelAdmin):
         'is_active', 
         'fraction_count', 
         'fraction_price',
-        'logo_url',
         'betting_status', 
         'next_draw_info'
     )
@@ -37,7 +36,7 @@ class LotteryAdmin(admin.ModelAdmin):
         ('Información Básica', {
             'fields': (
                 'name', 'code', 'draw_day', 'draw_time', 'is_active', 
-                'requires_series', 'available_series'
+                'requires_series', 'available_series', 'logo_url'
             )
         }),
         ('Configuración de Fracciones', {
