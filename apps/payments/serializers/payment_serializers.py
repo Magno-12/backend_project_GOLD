@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.payments.models.transaction import Transaction, UserBalance
+from apps.payments.models.withdrawal import PrizeWithdrawal
 from apps.payments.config import WOMPI_SETTINGS
 
 
@@ -65,3 +66,63 @@ class UserBalanceSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at', 'last_transaction_detail'
         ]
         read_only_fields = ['balance']
+
+
+class PrizeWithdrawalSerializer(serializers.ModelSerializer):
+    """Serializador para retiros de premios"""
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    bank_display = serializers.CharField(source='get_bank_display', read_only=True)
+    account_type_display = serializers.CharField(source='get_account_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = PrizeWithdrawal
+        fields = [
+            'id', 'user', 'user_name', 'amount', 'withdrawal_code',
+            'status', 'status_display', 'bank', 'bank_display', 
+            'account_type', 'account_type_display', 'account_number', 
+            'created_at', 'expiration_date', 'processed_date'
+        ]
+        read_only_fields = [
+            'withdrawal_code', 'status', 'expiration_date', 
+            'processed_date'
+        ]
+
+    def validate_amount(self, value):
+        """Validar monto del retiro"""
+        if value <= 0:
+            raise serializers.ValidationError("El monto debe ser mayor a 0")
+        user = self.context['request'].user
+        user_balance = UserBalance.objects.get(user=user).balance
+
+        if value > user_balance:
+            raise serializers.ValidationError(
+                "No tienes suficiente saldo para realizar este retiro"
+            )
+        return value
+
+    def validate(self, data):
+        # Validación especial para billeteras digitales
+        if data['bank'] in ['NEQUI', 'DAVIPLATA', 'DALE', 'MOVII', 'RAPPIPAY', 'IRIS', 'TPAGA']:
+            if data['account_type'] != 'DIGITAL':
+                raise serializers.ValidationError({
+                    'account_type': 'Las billeteras digitales solo pueden tener cuenta tipo Digital'
+                })
+
+        # Validaciones específicas por tipo de banco
+        if data['bank'] in ['NEQUI', 'DAVIPLATA']:
+            if not data['account_number'].isdigit() or len(data['account_number']) != 10:
+                raise serializers.ValidationError({
+                    'account_number': 'Para Nequi y Daviplata, el número debe ser un celular de 10 dígitos'
+                })
+        elif data['bank'] in ['BANCOLOMBIA', 'BANCO_BOGOTA', 'DAVIVIENDA']:
+            if not data['account_number'].isdigit():
+                raise serializers.ValidationError({
+                    'account_number': 'El número de cuenta debe contener solo dígitos'
+                })
+            if len(data['account_number']) < 8 or len(data['account_number']) > 20:
+                raise serializers.ValidationError({
+                    'account_number': 'Longitud inválida para el número de cuenta bancaria'
+                })
+
+        return data

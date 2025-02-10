@@ -10,12 +10,16 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 import uuid
 from decimal import Decimal
+from datetime import timedelta
 
 from apps.payments.models.transaction import Transaction, UserBalance
+from apps.payments.models.withdrawal import PrizeWithdrawal
+from apps.lottery.models.prize import Prize
 from apps.payments.serializers.payment_serializers import (
     TransactionSerializer,
     UserBalanceSerializer,
-    CardTokenizationSerializer
+    CardTokenizationSerializer,
+    PrizeWithdrawalSerializer
 )
 from apps.payments.services.wompi_service import WompiService
 from apps.payments.config import WOMPI_SETTINGS
@@ -314,6 +318,139 @@ class PaymentViewSet(GenericViewSet):
 
             return Response(TransactionSerializer(transaction_obj).data)
             
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post'])
+    def request_withdrawal(self, request):
+        """Solicitar retiro de premio"""
+        try:
+            serializer = PrizeWithdrawalSerializer(
+                data=request.data,
+                context={'request': request}
+            )
+            serializer.is_valid(raise_exception=True)
+
+            amount = serializer.validated_data['amount']
+
+            # Verificar si excede el límite
+            if amount > 10000000:
+                return Response({
+                    'warning': 'El monto excede el límite de retiro automático. '
+                            'Por favor contacta a soporte para procesar tu solicitud.',
+                    'support_contact': {
+                        'email': 'soporte@gold.com(provisional)',
+                        'phone': '+57xxxxxxxxxx',
+                        'hours': 'Lun-Vie 8am-6pm'
+                    }
+                }, status=status.HTTP_200_OK)
+
+            with transaction.atomic():
+                # Crear solicitud de retiro
+                withdrawal = serializer.save(
+                    user=request.user,
+                    expiration_date=timezone.now() + timedelta(hours=48)
+                )
+
+                # Descontar del balance
+                balance = UserBalance.objects.get(user=request.user)
+                balance.balance -= amount
+                balance.save()
+
+            return Response({
+                'message': 'Solicitud de retiro creada exitosamente',
+                'data': {
+                    'withdrawal_code': withdrawal.withdrawal_code,
+                    'amount': str(amount),
+                    'expiration_date': withdrawal.expiration_date,
+                    'new_balance': str(balance.balance)
+                }
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'])
+    def withdrawal_history(self, request):
+        """Obtener historial de retiros del usuario"""
+        try:
+            withdrawals = PrizeWithdrawal.objects.filter(user=request.user)
+            serializer = PrizeWithdrawalSerializer(withdrawals, many=True)
+
+            # Agrupar por estado
+            status_summary = {
+                'pending': 0,
+                'approved': 0,
+                'rejected': 0,
+                'total_amount': Decimal('0')
+            }
+
+            for withdrawal in withdrawals:
+                if withdrawal.status == 'PENDING':
+                    status_summary['pending'] += 1
+                elif withdrawal.status == 'APPROVED':
+                    status_summary['approved'] += 1
+                    status_summary['total_amount'] += withdrawal.amount
+                elif withdrawal.status == 'REJECTED':
+                    status_summary['rejected'] += 1
+
+            return Response({
+                'withdrawals': serializer.data,
+                'summary': status_summary
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=True, methods=['get'])
+    def withdrawal_status(self, request, pk=None):
+        """Consultar estado de un retiro específico"""
+        try:
+            withdrawal = PrizeWithdrawal.objects.get(
+                withdrawal_code=pk,
+                user=request.user
+            )
+            
+            # Verificar si debe revertirse
+            if withdrawal.should_revert:
+                withdrawal.revert_balance()
+            
+            serializer = PrizeWithdrawalSerializer(withdrawal)
+            
+            response_data = {
+                'status': withdrawal.status,
+                'status_display': withdrawal.get_status_display(),
+                'details': serializer.data
+            }
+
+            # Si está pendiente, agregar información del tiempo restante
+            if withdrawal.status == 'PENDING':
+                time_elapsed = timezone.now() - withdrawal.created_at
+                hours_remaining = 48 - (time_elapsed.total_seconds() / 3600)
+                
+                response_data['time_info'] = {
+                    'created_at': withdrawal.created_at,
+                    'hours_remaining': round(max(0, hours_remaining), 1),
+                    'will_revert_at': withdrawal.created_at + timedelta(hours=48),
+                    'current_time': timezone.now()
+                }
+
+            return Response(response_data)
+
+        except PrizeWithdrawal.DoesNotExist:
+            return Response(
+                {'error': 'Retiro no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
         except Exception as e:
             return Response(
                 {'error': str(e)},
