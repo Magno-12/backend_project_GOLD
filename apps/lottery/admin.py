@@ -26,6 +26,7 @@ class LotteryAdmin(admin.ModelAdmin):
         'is_active', 
         'fraction_count', 
         'fraction_price',
+        'logo_url',
         'betting_status', 
         'next_draw_info'
     )

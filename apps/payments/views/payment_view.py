@@ -456,3 +456,71 @@ class PaymentViewSet(GenericViewSet):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+        
+
+    @action(detail=True, methods=['get'])
+    def withdrawal_detail(self, request, pk=None):
+        """
+        Obtener detalle completo de un retiro específico.
+        El pk puede ser el ID del retiro o el código de retiro (withdrawal_code)
+        """
+        try:
+            # Intentar buscar por withdrawal_code primero
+            withdrawal = PrizeWithdrawal.objects.filter(
+                Q(withdrawal_code=pk) | Q(id=pk),
+                user=request.user
+            ).first()
+
+            if not withdrawal:
+                return Response(
+                    {'error': 'Retiro no encontrado'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            serializer = PrizeWithdrawalSerializer(withdrawal)
+            
+            # Calcular información adicional
+            time_elapsed = timezone.now() - withdrawal.created_at
+            hours_elapsed = time_elapsed.total_seconds() / 3600
+
+            response_data = {
+                'withdrawal_info': {
+                    **serializer.data,
+                    'status_display': withdrawal.get_status_display(),
+                    'bank_display': withdrawal.get_bank_display(),
+                    'account_type_display': withdrawal.get_account_type_display()
+                },
+                'timing_info': {
+                    'created_at': withdrawal.created_at,
+                    'processed_date': withdrawal.processed_date,
+                    'hours_elapsed': round(hours_elapsed, 1),
+                    'expiration_date': withdrawal.expiration_date
+                },
+                'status_info': {
+                    'is_expired': withdrawal.should_revert,
+                    'can_be_cancelled': withdrawal.status == 'PENDING' and not withdrawal.should_revert
+                }
+            }
+
+            # Si está pendiente, agregar información del tiempo restante
+            if withdrawal.status == 'PENDING':
+                hours_remaining = 48 - hours_elapsed
+                response_data['timing_info']['hours_remaining'] = round(max(0, hours_remaining), 1)
+
+            # Si fue procesado, agregar información del procesamiento
+            if withdrawal.status in ['APPROVED', 'REJECTED', 'REVERSED']:
+                response_data['processing_info'] = {
+                    'processed_at': withdrawal.processed_date,
+                    'processing_time': (
+                        withdrawal.processed_date - withdrawal.created_at
+                    ).total_seconds() / 3600 if withdrawal.processed_date else None,
+                    'admin_notes': withdrawal.admin_notes if withdrawal.admin_notes else None
+                }
+
+            return Response(response_data)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
