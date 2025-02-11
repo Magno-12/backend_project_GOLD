@@ -14,6 +14,7 @@ from datetime import timedelta
 
 from apps.payments.models.transaction import Transaction, UserBalance
 from apps.payments.models.withdrawal import PrizeWithdrawal
+from apps.payments.models.bank_account import BankDestinationAccount
 from apps.lottery.models.prize import Prize
 from apps.payments.serializers.payment_serializers import (
     TransactionSerializer,
@@ -339,19 +340,25 @@ class PaymentViewSet(GenericViewSet):
             # Verificar si excede el límite
             if amount > 10000000:
                 return Response({
-                    'warning': 'El monto excede el límite de retiro automático. '
-                            'Por favor contacta a soporte para procesar tu solicitud.',
-                    'support_contact': {
-                        'email': 'soporte@gold.com(provisional)',
-                        'phone': '+57xxxxxxxxxx',
-                        'hours': 'Lun-Vie 8am-6pm'
-                    }
+                    'warning': 'El monto excede el límite de retiro automático...'
                 }, status=status.HTTP_200_OK)
 
             with transaction.atomic():
-                # Crear solicitud de retiro
+                # Primero crear la cuenta de destino
+                destination_account = BankDestinationAccount.objects.create(
+                    bank=serializer.validated_data['bank'],
+                    account_type=serializer.validated_data['account_type'],
+                    account_number=serializer.validated_data['account_number'],
+                    account_owner=request.user.get_full_name(),  # Asumiendo que el titular es el usuario
+                    identification_type='CC',  # Esto deberías recibirlo en el request
+                    identification_number=request.user.identification_number,  # Asumiendo que el usuario tiene este campo
+                    description=f"Cuenta para retiro {serializer.validated_data['bank']}"
+                )
+
+                # Crear la solicitud de retiro con la cuenta de destino
                 withdrawal = serializer.save(
                     user=request.user,
+                    destination_account=destination_account,
                     expiration_date=timezone.now() + timedelta(hours=48)
                 )
 
