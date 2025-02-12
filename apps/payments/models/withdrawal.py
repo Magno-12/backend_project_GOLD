@@ -7,6 +7,7 @@ import uuid
 
 from apps.default.models.base_model import BaseModel
 from apps.payments.models.bank_account import BankDestinationAccount
+from apps.payments.models.transaction import UserBalance
 
 def generate_withdrawal_code():
     """Genera un código único para el retiro"""
@@ -154,6 +155,20 @@ class PrizeWithdrawal(BaseModel):
         # Si es una creación nueva, establecer fecha de expiración
         if not self.pk:
             self.expiration_date = timezone.now() + timedelta(hours=48)
+            super().save(*args, **kwargs)
+            return
+
+        # Obtener el estado anterior
+        old_instance = PrizeWithdrawal.objects.get(pk=self.pk)
+        
+        # Si el estado cambió a REJECTED, devolver el saldo
+        if old_instance.status == 'PENDING' and self.status == 'REJECTED':
+            with transaction.atomic():
+                balance = UserBalance.objects.select_for_update().get(user=self.user)
+                balance.balance += self.amount
+                balance.save()
+                self.processed_date = timezone.now()
+
         super().save(*args, **kwargs)
 
     @property

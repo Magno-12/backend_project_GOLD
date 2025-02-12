@@ -337,42 +337,64 @@ class PaymentViewSet(GenericViewSet):
 
             amount = serializer.validated_data['amount']
 
-            # Verificar si excede el límite
+            # Validar monto mínimo
+            if amount < 50000:
+                return Response({
+                    'error': 'El monto mínimo de retiro es de $50.000'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Validar monto máximo
             if amount > 10000000:
                 return Response({
-                    'warning': 'El monto excede el límite de retiro automático...'
+                    'warning': 'El monto excede el límite de retiro automático.',
+                    'support_contact': {
+                        'email': 'soporte@gold.com(provisional)',
+                        'phone': '+57xxxxxxxxxx',
+                        'hours': 'Lun-Vie 8am-6pm'
+                    }
                 }, status=status.HTTP_200_OK)
 
+            # Verificar si tiene saldo suficiente
+            balance = UserBalance.objects.get(user=request.user)
+            if balance.balance < amount:
+                return Response({
+                    'error': 'Saldo insuficiente para realizar el retiro'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             with transaction.atomic():
-                # Primero crear la cuenta de destino
+                # Crear o actualizar la cuenta destino
                 destination_account = BankDestinationAccount.objects.create(
                     bank=serializer.validated_data['bank'],
                     account_type=serializer.validated_data['account_type'],
                     account_number=serializer.validated_data['account_number'],
-                    account_owner=f"{request.user.first_name} {request.user.last_name}",  # Usando first_name y last_name directamente
-                    identification_type='CC',  
-                    identification_number=request.user.identification,  
+                    account_owner=f"{request.user.first_name} {request.user.last_name}",
+                    identification_type='CC',
+                    identification_number=request.user.identification,
                     description=f"Cuenta para retiro {serializer.validated_data['bank']}"
                 )
 
-                # Crear la solicitud de retiro con la cuenta de destino
-                withdrawal = serializer.save(
+                # Crear la solicitud de retiro
+                withdrawal = PrizeWithdrawal.objects.create(
                     user=request.user,
+                    amount=amount,
+                    bank=serializer.validated_data['bank'],
+                    account_type=serializer.validated_data['account_type'],
+                    account_number=serializer.validated_data['account_number'],
                     destination_account=destination_account,
-                    expiration_date=timezone.now() + timedelta(hours=48)
+                    status='PENDING'
                 )
 
-                # Descontar del balance
-                balance = UserBalance.objects.get(user=request.user)
+                # Descontar el saldo inmediatamente
                 balance.balance -= amount
                 balance.save()
 
             return Response({
-                'message': 'Solicitud de retiro creada exitosamente',
+                'message': 'Solicitud de retiro creada exitosamente. Pendiente de aprobación.',
                 'data': {
                     'withdrawal_code': withdrawal.withdrawal_code,
                     'amount': str(amount),
                     'expiration_date': withdrawal.expiration_date,
+                    'status': 'PENDING',
                     'new_balance': str(balance.balance)
                 }
             }, status=status.HTTP_201_CREATED)
