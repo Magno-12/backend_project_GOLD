@@ -349,9 +349,9 @@ class PaymentViewSet(GenericViewSet):
                     bank=serializer.validated_data['bank'],
                     account_type=serializer.validated_data['account_type'],
                     account_number=serializer.validated_data['account_number'],
-                    account_owner=request.user.get_full_name(),  # Asumiendo que el titular es el usuario
-                    identification_type='CC',  # Esto deberías recibirlo en el request
-                    identification_number=request.user.identification,  # Asumiendo que el usuario tiene este campo
+                    account_owner=f"{request.user.first_name} {request.user.last_name}",  # Usando first_name y last_name directamente
+                    identification_type='CC',  
+                    identification_number=request.user.identification,  
                     description=f"Cuenta para retiro {serializer.validated_data['bank']}"
                 )
 
