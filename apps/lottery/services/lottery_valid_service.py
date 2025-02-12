@@ -1,9 +1,10 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from django.utils import timezone
 from datetime import datetime, time
 from decimal import Decimal
+from django.db import transaction
 
-from apps.lottery.models import Lottery, Bet, PrizePlan
+from apps.lottery.models import Lottery, Bet, PrizePlan, LotteryNumberCombination
 from apps.users.models import User
 from apps.payments.models import UserBalance
 
@@ -15,23 +16,50 @@ class LotteryValidationService:
 
     def validate_number_availability(self, number: str, series: str) -> bool:
         """Valida disponibilidad de número en serie"""
-        # Si la lotería permite números duplicados en diferentes series
-        if self.lottery.allow_duplicate_numbers:
+        # Primero verificar si existe en combinaciones válidas
+        try:
+            combination = LotteryNumberCombination.objects.get(
+                lottery=self.lottery,
+                number=number,
+                series=series,
+                draw_date=self.lottery.next_draw_date,
+                is_active=True
+            )
+            if combination.available_fractions() <= 0:
+                return False
+        except LotteryNumberCombination.DoesNotExist:
+            # Si no existe en combinaciones válidas
+            if not self.lottery.allow_duplicate_numbers:
+                existing_bet = Bet.objects.filter(
+                    lottery=self.lottery,
+                    number=number,
+                    series=series,
+                    draw_date=self.lottery.next_draw_date,
+                    status='PENDING'
+                ).exists()
+                return not existing_bet
             return True
-            
-        # Si no permite duplicados, verificar la combinación exacta
-        existing_bet = Bet.objects.filter(
-            lottery=self.lottery,
-            number=number,
-            series=series,  # La serie específica
-            draw_date=self.lottery.next_draw_date,
-            status='PENDING'
-        ).exists()
         
-        return not existing_bet
+        return True
 
     def get_available_numbers(self, series: str) -> List[str]:
         """Obtiene números disponibles en una serie"""
+        # Obtener números de combinaciones válidas
+        valid_combinations = set(
+            LotteryNumberCombination.objects.filter(
+                lottery=self.lottery,
+                series=series,
+                draw_date=self.lottery.next_draw_date,
+                is_active=True
+            ).exclude(
+                used_fractions__gte=models.F('total_fractions')
+            ).values_list('number', flat=True)
+        )
+
+        if valid_combinations:
+            return sorted(list(valid_combinations))
+
+        # Si no hay combinaciones válidas, usar la lógica anterior
         used_numbers = set(Bet.objects.filter(
             lottery=self.lottery,
             series=series,
@@ -61,15 +89,30 @@ class LotteryValidationService:
                 f"Fuera del horario permitido para apuestas (hasta {self.lottery.closing_time})"
             )
 
-        # 3. Validar número
+        # 3. Validar número y sus combinaciones
         if not self.validate_number_format(number):
             self.validation_errors.append(
                 "El número debe ser de 4 dígitos (0000-9999)"
             )
-        elif not self.validate_number_availability(number, series):
-            self.validation_errors.append(
-                f"El número {number} no está disponible en la serie {series}"
-            )
+        else:
+            # Verificar en combinaciones válidas
+            try:
+                combination = LotteryNumberCombination.objects.get(
+                    lottery=self.lottery,
+                    number=number,
+                    series=series,
+                    draw_date=self.lottery.next_draw_date,
+                    is_active=True
+                )
+                if combination.available_fractions() < fractions:
+                    self.validation_errors.append(
+                        f"Solo hay {combination.available_fractions()} fracciones disponibles"
+                    )
+            except LotteryNumberCombination.DoesNotExist:
+                if not self.validate_number_availability(number, series):
+                    self.validation_errors.append(
+                        f"El número {number} no está disponible en la serie {series}"
+                    )
 
         # 4. Validar serie
         if not self.validate_series_format(series):
@@ -158,6 +201,26 @@ class LotteryValidationService:
         return (
             self.lottery.min_bet_amount <= amount <= self.lottery.max_bet_amount
         )
+
+    @transaction.atomic
+    def reserve_fractions(self, number: str, series: str, fractions: int) -> bool:
+        """Reserva fracciones para una combinación"""
+        try:
+            combination = LotteryNumberCombination.objects.select_for_update().get(
+                lottery=self.lottery,
+                number=number,
+                series=series,
+                draw_date=self.lottery.next_draw_date,
+                is_active=True
+            )
+            
+            if combination.available_fractions() >= fractions:
+                combination.used_fractions += fractions
+                combination.save()
+                return True
+            return False
+        except LotteryNumberCombination.DoesNotExist:
+            return True  # Si no existe la combinación, permitir la apuesta
 
     def get_bet_summary(self,
                        number: str,

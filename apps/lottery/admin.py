@@ -13,7 +13,7 @@ import pytz
 from datetime import datetime, time
 from io import TextIOWrapper
 from datetime import datetime
-from .models import Lottery, Bet, LotteryResult, Prize, PrizePlan, PrizeType
+from .models import Lottery, Bet, LotteryResult, Prize, PrizePlan, PrizeType, LotteryNumberCombination
 
 
 @admin.register(Lottery)
@@ -60,7 +60,8 @@ class LotteryAdmin(admin.ModelAdmin):
     actions = [
         'generate_sales_file',
         'generate_unsold_file', 
-        'generate_type_204_report'
+        'generate_type_204_report',
+        'process_combinations_csv'
     ]
 
     def betting_status(self, obj):
@@ -259,6 +260,104 @@ class LotteryAdmin(admin.ModelAdmin):
 
     generate_type_204_report.short_description = "Generar reporte tipo 204"
 
+    def process_combinations_csv(self, request, queryset):
+        """Procesa archivo CSV de combinaciones válidas"""
+        if len(queryset) != 1:
+            self.message_user(request, "Seleccione una sola lotería", level=messages.ERROR)
+            return
+
+        lottery = queryset[0]
+
+        # Si el formulario fue enviado
+        if request.POST.get('_process_csv'):
+            if 'csv_file' not in request.FILES:
+                self.message_user(request, 'Debe seleccionar un archivo CSV', level=messages.ERROR)
+                return
+                
+            csv_file = request.FILES['csv_file']
+            if not csv_file.name.endswith('.csv'):
+                self.message_user(request, 'El archivo debe ser CSV', level=messages.ERROR)
+                return
+
+            try:
+                # Procesar CSV usando pandas
+                df = pd.read_csv(csv_file, dtype={
+                    '5100': str,  # número
+                    '001': str,   # serie
+                    '175': int,   # fracciones (opcional)
+                    '0000': str   # otro campo si existe
+                })
+                
+                processed = 0
+                errors = []
+                
+                with transaction.atomic():
+                    # Desactivar combinaciones anteriores
+                    LotteryNumberCombination.objects.filter(
+                        lottery=lottery,
+                        draw_date=lottery.next_draw_date
+                    ).update(is_active=False)
+                    
+                    for index, row in df.iterrows():
+                        try:
+                            number = str(row['5100']).zfill(4)
+                            series = str(row['001']).zfill(3)
+                            
+                            if not (number.isdigit() and len(number) == 4):
+                                errors.append(f"Fila {index + 2}: Número inválido {number}")
+                                continue
+                                
+                            if not (series.isdigit() and len(series) == 3):
+                                errors.append(f"Fila {index + 2}: Serie inválida {series}")
+                                continue
+                            
+                            combination, created = LotteryNumberCombination.objects.update_or_create(
+                                lottery=lottery,
+                                number=number,
+                                series=series,
+                                draw_date=lottery.next_draw_date,
+                                defaults={
+                                    'total_fractions': lottery.fraction_count,
+                                    'used_fractions': 0,
+                                    'is_active': True
+                                }
+                            )
+                            processed += 1
+                            
+                        except Exception as e:
+                            errors.append(f"Error en fila {index + 2}: {str(e)}")
+                
+                if errors:
+                    self.message_user(
+                        request,
+                        f'Proceso completado con {len(errors)} errores. '
+                        f'Se procesaron {processed} combinaciones correctamente.',
+                        level=messages.WARNING
+                    )
+                else:
+                    self.message_user(
+                        request,
+                        f'Se procesaron {processed} combinaciones correctamente.',
+                        level=messages.SUCCESS
+                    )
+                    
+            except Exception as e:
+                self.message_user(request, f'Error procesando archivo: {str(e)}', level=messages.ERROR)
+            return
+
+        # Mostrar formulario de carga usando el intermediario de Django
+        form = CsvImportForm()
+        return self.admin_site.admin_view(lambda r: HttpResponse('''
+            <form method="post" enctype="multipart/form-data">
+                <input type="hidden" name="_process_csv" value="1">
+                <input type="file" name="csv_file" accept=".csv" required>
+                <input type="submit" value="Procesar CSV">
+                <input type="hidden" name="csrfmiddlewaretoken" value="{}">
+            </form>
+        '''.format(request.CSRF_TOKEN)))(request)
+
+    process_combinations_csv.short_description = "Procesar CSV de combinaciones"
+
     def is_betting_allowed(self, lottery):
         """Verifica si se permite apostar en este momento"""
         bogota_tz = pytz.timezone('America/Bogota')
@@ -309,6 +408,18 @@ class LotteryAdmin(admin.ModelAdmin):
             obj.available_series = list(set(obj.available_series))
 
         super().save_model(request, obj, form, change)
+
+
+@admin.register(LotteryNumberCombination)
+class LotteryNumberCombinationAdmin(admin.ModelAdmin):
+    list_display = ('lottery', 'number', 'series', 'available_fractions', 'is_active', 'draw_date')
+    list_filter = ('lottery', 'is_active', 'draw_date')
+    search_fields = ('number', 'series')
+    readonly_fields = ('used_fractions',)
+    
+    def available_fractions(self, obj):
+        return obj.total_fractions - obj.used_fractions
+    available_fractions.short_description = 'Fracciones Disponibles'
 
 
 @admin.register(Bet)

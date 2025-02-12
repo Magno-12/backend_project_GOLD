@@ -1,98 +1,124 @@
 # Django & Core
-Django
-django-environ
-django-filter
-django-cors-headers
-django-storages
-djangorestframework
-djangorestframework-simplejwt
+Django==5.1.2
+django-environ==0.11.2
+django-filter==24.3
+django-cors-headers==4.6.0
+django-storages==1.14.4
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.3.1
+asgiref==3.8.1
 
 # Database
-psycopg2-binary
-dj-database-url
+psycopg2-binary==2.9.10
+dj-database-url==2.3.0
 
-# AWS
-boto3
-botocore
+# AWS & Storage
+boto3==1.35.54
+botocore==1.35.54
+django-cleanup==9.0.0
+cloudinary==1.41.0
 
 # Image Processing
-Pillow
+Pillow==11.0.0
 
-# Security
-django-guardian
-django-oauth-toolkit
-python-dotenv
-django-ratelimit
+# Security & Authentication
+django-guardian==2.4.0
+django-oauth-toolkit==3.0.1
+python-dotenv==1.0.1
+django-ratelimit==4.1.0
+django-allauth==65.1.0
+django-rest-auth==0.9.5
+PyJWT==2.9.0
+oauthlib==3.2.2
+jwcrypto==1.5.6
 
-# Cache
-django-redis
-redis
+# Cache & Performance
+django-redis==5.4.0
+redis==5.2.0
+django-cacheops==7.1
+django-silk==5.3.0
 
-# Development Tools
-black
-isort
-flake8
-mypy
-pre-commit
+# Development Tools & Quality
+black==24.10.0
+isort==5.13.2
+flake8==7.1.1
+mypy==1.13.0
+pre-commit==4.0.1
+autopep8==2.3.1
+django-extensions==3.2.3
+django-debug-toolbar==4.4.6
+ipython==8.29.0
 
 # Testing
-pytest
-pytest-django
-pytest-cov
-factory-boy
-faker
+pytest==8.3.3
+pytest-django==4.9.0
+pytest-cov==6.0.0
+factory-boy==3.3.1
+Faker==30.8.2
+coverage==7.6.4
 
-# Documentation
-drf-yasg
-django-debug-toolbar
+# API Documentation
+drf-yasg==1.21.8
+drf-spectacular==0.27.2
+uritemplate==4.1.1
 
-# Utilities
-python-dateutil
-pytz
-requests
-urllib3
-
-# Task Queue
-celery
-django-celery-results
-django-celery-beat
+# Task Queue & Async
+celery==5.4.0
+django-celery-results==2.5.1
+django-celery-beat==2.7.0
+amqp==5.2.0
+billiard==4.2.1
+vine==5.1.0
+kombu==5.4.2
 
 # Email
-django-anymail
+django-anymail==12.0
 
-# Monitoring
-sentry-sdk
+# Monitoring & Logging
+sentry-sdk==2.17.0
 
-# Performance
-django-cacheops
-django-silk
-
-# Admin Interface
-django-jazzmin
-
-# API Tools
-drf-spectacular
+# Admin Interface & Forms
+django-jazzmin==3.0.1
+django-crispy-forms==2.3
+crispy-bootstrap5==2024.10
 
 # Internationalization
-django-rosetta
+django-rosetta==0.10.1
+pytz==2024.2
 
-# Forms and Widgets
-django-crispy-forms
-crispy-bootstrap5
+# Deployment & Server
+gunicorn==23.0.0
+whitenoise==6.8.2
+daphne==4.1.2
+uvicorn==0.32.1
 
-# Storage
-django-cleanup
+# Data Processing & Analysis
+numpy==2.2.2
+pandas==2.2.3
+python-dateutil==2.9.0.post0
 
-# Authentication and Authorization
-django-allauth
-django-rest-auth
+# HTTP & Networking
+requests==2.32.3
+urllib3==2.2.3
+certifi==2024.8.30
+charset-normalizer==3.4.0
+idna==3.10
 
-# Deployment
-gunicorn
-whitenoise
-daphne
+# WebSocket & Real-time
+autobahn==24.4.2
+Automat==24.8.1
+Twisted==24.10.0
+txaio==23.1.1
 
-# Development and Debugging
-ipython
-django-extensions
-cloudinary
+# Utilities & Dependencies
+six==1.16.0
+sqlparse==0.5.1
+typing_extensions==4.12.2
+PyYAML==6.0.2
+click==8.1.7
+platformdirs==4.3.6
+packaging==24.1
+jsonschema==4.23.0
+python-crontab==3.2.0
+tzdata==2024.2
+zope.interface==7.1.1
