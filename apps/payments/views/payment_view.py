@@ -11,6 +11,7 @@ from django.db import transaction
 import uuid
 from decimal import Decimal
 from datetime import timedelta
+from django.db.models import Q
 
 from apps.payments.models.transaction import Transaction, UserBalance
 from apps.payments.models.withdrawal import PrizeWithdrawal
