@@ -28,7 +28,7 @@ class Bet(BaseModel):
     )
     series = models.CharField(
         'Serie',
-        max_length=3,  # Ajustado a 3 para ser consistente
+        max_length=3,
         validators=[
             RegexValidator(
                 r'^\d{3}$',
@@ -71,13 +71,6 @@ class Bet(BaseModel):
         verbose_name = 'Apuesta'
         verbose_name_plural = 'Apuestas'
         ordering = ['-created_at']
-        constraints = [
-        # Debe incluir también la fecha del sorteo
-        models.UniqueConstraint(
-            fields=['lottery', 'number', 'series', 'draw_date'],
-            name='unique_lottery_number_series_date'
-        )
-    ]
 
     def __str__(self):
         return f"{self.user.get_full_name()} - {self.lottery.name} - {self.number}"
