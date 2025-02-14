@@ -66,6 +66,11 @@ class Lottery(BaseModel):
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0'))]
     )
+    max_fractions_per_bet = models.PositiveIntegerField(
+        'Máximo fracciones por apuesta',
+        validators=[MinValueValidator(1)],
+        help_text='Máximo de fracciones que un usuario puede comprar en una sola apuesta. No puede ser mayor que el total de fracciones del billete.'
+    )
     logo_url = models.URLField('Logo URL', blank=True)
     is_active = models.BooleanField('Activa', default=True)
     requires_series = models.BooleanField('Requiere serie', default=True)
@@ -111,7 +116,7 @@ class Lottery(BaseModel):
         blank=True
     )
 
-    # Nuevos campos de validación
+    # Campos de validación
     number_range_start = models.CharField(
         'Rango inicial',
         max_length=4,
@@ -138,12 +143,6 @@ class Lottery(BaseModel):
         'Permitir números duplicados en series',
         default=False,
         help_text='Si está activo, permite el mismo número en diferentes series'
-    )
-    max_fractions_per_combination = models.PositiveIntegerField(
-        'Máximo fracciones por combinación',
-        default=1,
-        validators=[MinValueValidator(1)],
-        help_text='Máximo de fracciones que un usuario puede comprar por combinación número-serie'
     )
 
     available_series = ArrayField(
@@ -178,21 +177,21 @@ class Lottery(BaseModel):
             if series not in self.available_series:
                 return False, f"Serie {series} no disponible para esta lotería"
 
-        # 3. Validar que esta combinación número-serie no esté ya apostada para el próximo sorteo
-        existing_bet = Bet.objects.filter(
+        # 3. Validar que no se excedan las fracciones disponibles para esta combinación
+        existing_fractions = Bet.objects.filter(
             lottery=self,
             number=number,
             series=series,
             draw_date=self.next_draw_date,
             status='PENDING'  # Solo considerar apuestas pendientes
-        ).exists()
+        ).count()
         
-        if existing_bet:
-            return False, "Esta combinación número-serie ya está apostada para el próximo sorteo"
+        if existing_fractions + fractions > self.fraction_count:
+            return False, f"Solo quedan {self.fraction_count - existing_fractions} fracciones disponibles para esta combinación"
 
-        # 4. Validar el número de fracciones
-        if fractions > self.max_fractions_per_combination:
-            return False, f"Máximo {self.max_fractions_per_combination} fracciones por combinación"
+        # 4. Validar el número de fracciones por apuesta individual
+        if fractions > self.max_fractions_per_bet:
+            return False, f"Máximo {self.max_fractions_per_bet} fracciones por apuesta"
 
         return True, "Apuesta válida"
 
@@ -263,6 +262,10 @@ class Lottery(BaseModel):
             # Actualizar next_draw_date cada vez que se guarda
             if not self.next_draw_date or timezone.now().date() >= self.next_draw_date:
                 self.next_draw_date = self.get_days_until_next_draw()
+            
+            # Asegurar que max_fractions_per_bet no sea mayor que fraction_count
+            if self.max_fractions_per_bet > self.fraction_count:
+                self.max_fractions_per_bet = self.fraction_count
                 
         super().save(*args, **kwargs)
 
@@ -271,16 +274,15 @@ class Lottery(BaseModel):
         verbose_name_plural = 'Loterías'
         ordering = ['name']
         constraints = [
-        # Este constraint no debería estar aquí
-        models.UniqueConstraint(
-            fields=['code', 'name'],
-            name='unique_lottery_code_name'
-        ),
-        models.CheckConstraint(
-            check=models.Q(number_range_start__lte=models.F('number_range_end')),
-            name='valid_number_range'
-        )
-    ]
+            models.UniqueConstraint(
+                fields=['code', 'name'],
+                name='unique_lottery_code_name'
+            ),
+            models.CheckConstraint(
+                check=models.Q(number_range_start__lte=models.F('number_range_end')),
+                name='valid_number_range'
+            )
+        ]
 
     def __str__(self):
         return self.name
