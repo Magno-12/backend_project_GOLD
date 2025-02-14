@@ -435,6 +435,9 @@ class BetViewSet(GenericViewSet):
         
         try:
             with transaction.atomic():
+                # Diccionario para llevar el conteo de fracciones por combinación
+                fraction_counts = {}
+                
                 # Verificar si es una lista de apuestas o una sola
                 if isinstance(request.data, list):
                     logger.debug("Procesando lista de apuestas")
@@ -494,7 +497,35 @@ class BetViewSet(GenericViewSet):
                             fractions = bet_data.get('fractions', 1)
                             logger.debug(f"Detalles apuesta - Número: {number}, Serie: {series}, Fracciones: {fractions}")
 
-                            # Validar rango y combinación número-serie
+                            # Generar clave única para la combinación
+                            combination_key = f"{lottery.name}-{number}-{series}-{next_draw_date}"
+                            
+                            # Obtener fracciones existentes en BD
+                            existing_fractions = Bet.objects.filter(
+                                lottery=lottery,
+                                number=number,
+                                series=series,
+                                draw_date=next_draw_date,
+                                status='PENDING'
+                            ).count()
+                            
+                            # Sumar fracciones de la transacción actual
+                            current_transaction_fractions = fraction_counts.get(combination_key, 0)
+                            total_existing_fractions = existing_fractions + current_transaction_fractions
+                            
+                            # Validar que no se excedan las fracciones totales
+                            if total_existing_fractions + fractions > lottery.fraction_count:
+                                remaining = lottery.fraction_count - total_existing_fractions
+                                validation_errors.append({
+                                    'bet_data': bet_data,
+                                    'errors': [f'Solo quedan {remaining} fracciones disponibles para esta combinación']
+                                })
+                                continue
+
+                            # Actualizar el conteo de fracciones para esta combinación
+                            fraction_counts[combination_key] = current_transaction_fractions + fractions
+
+                            # Validar otras reglas de la apuesta
                             is_valid, message = lottery.validate_bet(number, series, fractions)
                             logger.debug(f"Validación de apuesta: {is_valid} - {message}")
                             if not is_valid:
@@ -610,9 +641,27 @@ class BetViewSet(GenericViewSet):
                         # Validar número y serie
                         number = bet_data.get('number')
                         series = bet_data.get('series')
-                        fractions = int(amount/lottery.fraction_price)
+                        fractions = bet_data.get('fractions', 1)
                         logger.debug(f"Detalles apuesta - Número: {number}, Serie: {series}, Fracciones: {fractions}")
+
+                        # Obtener fracciones existentes
+                        existing_fractions = Bet.objects.filter(
+                            lottery=lottery,
+                            number=number,
+                            series=series,
+                            draw_date=next_draw_date,
+                            status='PENDING'
+                        ).count()
+
+                        # Validar que no se excedan las fracciones totales
+                        if existing_fractions + fractions > lottery.fraction_count:
+                            remaining = lottery.fraction_count - existing_fractions
+                            return Response(
+                                {'error': f'Solo quedan {remaining} fracciones disponibles para esta combinación'},
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
                         
+                        # Validar otras reglas
                         is_valid, message = lottery.validate_bet(number, series, fractions)
                         logger.debug(f"Validación de apuesta: {is_valid} - {message}")
                         if not is_valid:
