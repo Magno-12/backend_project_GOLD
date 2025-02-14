@@ -177,19 +177,7 @@ class Lottery(BaseModel):
             if series not in self.available_series:
                 return False, f"Serie {series} no disponible para esta lotería"
 
-        # 3. Validar que no se excedan las fracciones disponibles para esta combinación
-        existing_fractions = Bet.objects.filter(
-            lottery=self,
-            number=number,
-            series=series,
-            draw_date=self.next_draw_date,
-            status='PENDING'  # Solo considerar apuestas pendientes
-        ).count()
-        
-        if existing_fractions + fractions > self.fraction_count:
-            return False, f"Solo quedan {self.fraction_count - existing_fractions} fracciones disponibles para esta combinación"
-
-        # 4. Validar el número de fracciones por apuesta individual
+        # 3. Validar el número de fracciones por apuesta individual
         if fractions > self.max_fractions_per_bet:
             return False, f"Máximo {self.max_fractions_per_bet} fracciones por apuesta"
 

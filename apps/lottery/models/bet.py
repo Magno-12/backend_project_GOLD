@@ -42,6 +42,11 @@ class Bet(BaseModel):
         decimal_places=2,
         validators=[MinValueValidator(0)]
     )
+    fractions = models.PositiveIntegerField(
+        'Cantidad de fracciones',
+        default=1,
+        validators=[MinValueValidator(1)]
+    )
     draw_date = models.DateField('Fecha del sorteo')
     status = models.CharField(
         'Estado',
