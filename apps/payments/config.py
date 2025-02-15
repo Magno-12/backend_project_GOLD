@@ -1,7 +1,7 @@
 from django.conf import settings
 
 WOMPI_SETTINGS = {
-    'SANDBOX_URL': 'https://sandbox.wompi.co/v1',
+    'SANDBOX_URL': 'https://production.wompi.co/v1',
     'SANDBOX_PUBLIC_KEY': settings.WOMPI_PUBLIC_KEY,
     'SANDBOX_PRIVATE_KEY': settings.WOMPI_PRIVATE_KEY,
     'SANDBOX_EVENTS_KEY': settings.WOMPI_EVENTS_KEY,
