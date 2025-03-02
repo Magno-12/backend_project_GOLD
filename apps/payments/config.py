@@ -1,0 +1,31 @@
+from django.conf import settings
+
+WOMPI_SETTINGS = {
+    'SANDBOX_URL': 'https://production.wompi.co/v1',
+    'SANDBOX_PUBLIC_KEY': settings.WOMPI_PUBLIC_KEY,
+    'SANDBOX_PRIVATE_KEY': settings.WOMPI_PRIVATE_KEY,
+    'SANDBOX_EVENTS_KEY': settings.WOMPI_EVENTS_KEY,
+    'SANDBOX_INTEGRITY_KEY': settings.WOMPI_INTEGRITY_KEY,
+    'CURRENCY': 'COP',
+    'REDIRECT_URL': f"{settings.SITE_URL}/api/payments/process/",
+    'MIN_AMOUNT': 5000,  # 50 pesos
+    'MAX_AMOUNT': 999999999,  # 9,999,999.99 pesos
+}
+
+PAYMENT_METHODS = {
+    'CARD': 'CARD',
+    'NEQUI': 'NEQUI',
+    'PSE': 'PSE',
+    'BANCOLOMBIA_TRANSFER': 'BANCOLOMBIA_TRANSFER',
+    'BANCOLOMBIA_COLLECT': 'BANCOLOMBIA_COLLECT',
+    'BANCOLOMBIA_QR': 'BANCOLOMBIA_QR',
+    'DAVIPLATA': 'DAVIPLATA'
+}
+
+TRANSACTION_STATUS = {
+    'PENDING': 'PENDING',
+    'APPROVED': 'APPROVED',
+    'DECLINED': 'DECLINED',
+    'VOIDED': 'VOIDED',
+    'ERROR': 'ERROR'
+}
