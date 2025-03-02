@@ -18,10 +18,13 @@ class LotteryValidationService:
         self.validation_errors = []
 
     def validate_combination_fractions(self, number: str, series: str, fractions: int, next_draw_date, fraction_counts: dict) -> tuple[bool, int]:
-        """
-        Valida el total de fracciones para una combinación
-        """
-        # 1. Mostrar todas las apuestas existentes para esta combinación
+        # Generar una clave para esta combinación
+        combination_key = f"{self.lottery.name}-{number}-{series}-{next_draw_date}"
+        
+        # Obtener fracciones en el lote de transacciones actual
+        current_batch_fractions = fraction_counts.get(combination_key, 0)
+        
+        # Obtener fracciones existentes de la base de datos (ya compradas)
         existing_bets = Bet.objects.filter(
             lottery=self.lottery,
             number=number,
@@ -30,32 +33,25 @@ class LotteryValidationService:
             status='PENDING'
         )
         
-        logger.debug("Apuestas existentes detalladas:")
-        for bet in existing_bets:
-            logger.debug(f"ID: {bet.id}, Fracciones: {bet.fractions}, Estado: {bet.status}, Fecha: {bet.created_at}")
-        
-        # 2. Calcular total de fracciones vendidas
         sold_fractions = existing_bets.aggregate(
             total=models.Sum('fractions')
         )['total'] or 0
         
-        logger.debug(f"Total fracciones vendidas: {sold_fractions}")
-        logger.debug(f"Máximo fracciones permitidas: {self.lottery.fraction_count}")
+        # Total de fracciones usadas = fracciones en base de datos + fracciones en lote actual
+        total_used_fractions = sold_fractions + current_batch_fractions
         
-        # 3. Verificar si ya se vendieron todas
-        if sold_fractions >= self.lottery.fraction_count:
-            logger.debug("Ya se vendieron todas las fracciones permitidas")
+        # Verificar si todas las fracciones ya están usadas
+        if total_used_fractions >= self.lottery.fraction_count:
             return False, 0
         
-        # 4. Verificar fracciones realmente disponibles
-        available = self.lottery.fraction_count - sold_fractions
-        logger.debug(f"Fracciones disponibles calculadas: {available}")
+        # Calcular fracciones disponibles
+        available = self.lottery.fraction_count - total_used_fractions
         
-        # 5. Verificar si la nueva compra excede el límite
+        # Verificar si la nueva compra excede el límite
         if fractions > available:
-            logger.debug(f"Compra de {fractions} fracciones excede las {available} disponibles")
-            return False, 0  # Si no hay suficientes, mejor decir que no hay disponibles
+            return False, available
         
+        # Devolver verdadero y fracciones restantes DESPUÉS de esta compra
         return True, available - fractions
 
     def get_available_numbers(self, series: str) -> List[str]:
