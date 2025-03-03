@@ -547,7 +547,33 @@ class BetViewSet(GenericViewSet):
                             series = bet_data.get('series')
                             fractions = bet_data.get('fractions', 1)
                             amount = Decimal(str(bet_data.get('amount')))
-                            logger.debug(f"Detalles apuesta - Número: {number}, Serie: {series}, Fracciones: {fractions}")
+                            
+                            # Logs detallados
+                            logger.info(f"===== PROCESANDO APUESTA EN BATCH =====")
+                            logger.info(f"Lotería: {lottery.name}, Número: {number}, Serie: {series}, Fracciones: {fractions}")
+                            logger.info(f"Monto: {amount}, Fecha sorteo: {next_draw_date}")
+                            
+                            # Verificar nuevamente fracciones disponibles para esta apuesta (doble verificación)
+                            existing_bets = Bet.objects.filter(
+                                lottery=lottery,
+                                number=number,
+                                series=series,
+                                draw_date=next_draw_date,
+                                status='PENDING'
+                            )
+                            sold_fractions = existing_bets.aggregate(
+                                total=models.Sum('fractions')
+                            )['total'] or 0
+                            manual_sum = sum(bet.fractions for bet in existing_bets)
+                            available = lottery.fraction_count - sold_fractions
+                            
+                            logger.info(f"Doble verificación - Fracciones vendidas: {sold_fractions} (manual: {manual_sum})")
+                            logger.info(f"Doble verificación - Fracciones disponibles: {available}")
+                            
+                            # Verificar el acumulado del batch en este punto
+                            combination_key = f"{lottery.name}-{number}-{series}-{next_draw_date}"
+                            batch_fractions = fraction_counts.get(combination_key, 0)
+                            logger.info(f"Fracciones acumuladas en el batch hasta este punto: {batch_fractions}")
 
                             # Ya no necesitamos volver a validar las fracciones disponibles
                             # pues lo hicimos en el preprocesamiento
@@ -665,14 +691,53 @@ class BetViewSet(GenericViewSet):
                             status='PENDING'
                         )
                         
+                        # Log detallado de las apuestas existentes
+                        logger.info(f"===== VERIFICACIÓN DE FRACCIONES =====")
+                        logger.info(f"Lotería: {lottery.name}, Número: {number}, Serie: {series}, Fecha: {next_draw_date}")
+                        logger.info(f"Total fracciones por billete: {lottery.fraction_count}")
+                        logger.info(f"Fracciones solicitadas: {fractions}")
+                        
+                        # Log de apuestas existentes
+                        logger.info(f"Apuestas existentes para esta combinación:")
+                        for bet in existing_bets:
+                            logger.info(f"  ID: {bet.id}, Fracciones: {bet.fractions}, Usuario: {bet.user.id}, Fecha creación: {bet.created_at}")
+                        
                         # Calcular fracciones ya vendidas en la base de datos
                         sold_fractions = existing_bets.aggregate(
                             total=models.Sum('fractions')
                         )['total'] or 0
-                        logger.debug(f"Fracciones ya vendidas: {sold_fractions} de {lottery.fraction_count}")
+                        logger.info(f"Fracciones ya vendidas (según suma): {sold_fractions} de {lottery.fraction_count}")
+                        
+                        # Verificación manual del total (para comparar con el aggregate)
+                        manual_sum = sum(bet.fractions for bet in existing_bets)
+                        logger.info(f"Fracciones ya vendidas (suma manual): {manual_sum}")
+                        
+                        # Si hay discrepancia, es un problema serio
+                        if manual_sum != sold_fractions:
+                            logger.error(f"¡DISCREPANCIA EN LA SUMA DE FRACCIONES! Aggregate: {sold_fractions}, Manual: {manual_sum}")
                         
                         # Calcular fracciones disponibles
                         available_fractions = lottery.fraction_count - sold_fractions
+                        logger.info(f"Fracciones disponibles: {available_fractions}")
+                        
+                        # Verificar fracciones en el modelo
+                        try:
+                            from apps.lottery.models.lottery_number_combination import LotteryNumberCombination
+                            combination = LotteryNumberCombination.objects.filter(
+                                lottery=lottery,
+                                number=number,
+                                series=series,
+                                draw_date=next_draw_date,
+                                is_active=True
+                            ).first()
+                            
+                            if combination:
+                                logger.info(f"Combinación encontrada en LotteryNumberCombination:")
+                                logger.info(f"  Total fracciones: {combination.total_fractions}")
+                                logger.info(f"  Fracciones usadas: {combination.used_fractions}")
+                                logger.info(f"  Disponibles: {combination.total_fractions - combination.used_fractions}")
+                        except Exception as e:
+                            logger.info(f"Error al buscar combinación: {str(e)}")
                         
                         # Verificar si hay suficientes fracciones disponibles
                         if fractions > available_fractions:
