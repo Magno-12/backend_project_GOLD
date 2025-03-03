@@ -81,14 +81,13 @@ class LotteryValidationService:
         return sorted(all_numbers - used_numbers)
 
     def validate_bet_request(self,
-                           user: User,
-                           number: str,
-                           series: str,
-                           fractions: int,
-                           amount: Decimal,
-                           fraction_counts: dict = None) -> Dict:
+                       user: User,
+                       number: str,
+                       series: str,
+                       fractions: int,
+                       amount: Decimal) -> Dict:
         """Validación completa de una solicitud de apuesta"""
-        fraction_counts = fraction_counts or {}
+        self.validation_errors = []
 
         # 1. Validar estado de la lotería
         if not self.lottery.is_active:
@@ -100,22 +99,7 @@ class LotteryValidationService:
                 f"Fuera del horario permitido para apuestas (hasta {self.lottery.closing_time})"
             )
 
-        # 3. Validar fracciones disponibles
-        is_valid, remaining = self.validate_combination_fractions(
-            number, series, fractions,
-            self.lottery.next_draw_date, fraction_counts
-        )
-        if not is_valid:
-            if remaining == 0:
-                self.validation_errors.append(
-                    'No hay fracciones disponibles para esta combinación'
-                )
-            else:
-                self.validation_errors.append(
-                    f'Solo quedan {remaining} fracciones disponibles para esta combinación'
-                )
-
-        # 4. Validar número y serie
+        # 3. Validar número y serie
         if not self.validate_number_format(number):
             self.validation_errors.append(
                 "El número debe ser de 4 dígitos (0000-9999)"
@@ -126,6 +110,13 @@ class LotteryValidationService:
                 "La serie debe ser de 3 dígitos (000-999)"
             )
 
+        # 4. Validar si el número de fracciones es válido 
+        # (no puede ser mayor que el total de fracciones por billete)
+        if fractions > self.lottery.fraction_count:
+            self.validation_errors.append(
+                f"El número máximo de fracciones por apuesta es {self.lottery.fraction_count}"
+            )
+        
         # 5. Validar monto
         if not self.validate_bet_amount(amount, fractions):
             self.validation_errors.append(
