@@ -468,7 +468,7 @@ class BetViewSet(GenericViewSet):
                     serializers = []
                     validation_errors = []
                     
-                    # Preprocesamiento para validar fracciones disponibles en todo el lote
+                        # Preprocesamiento para validar fracciones disponibles en todo el lote
                     for bet_data in request.data:
                         try:
                             lottery = Lottery.objects.get(name=bet_data.get('lottery'))
@@ -502,14 +502,27 @@ class BetViewSet(GenericViewSet):
                             # Verificar que no exceda el límite
                             if new_total > lottery.fraction_count:
                                 available = lottery.fraction_count - sold_fractions - current_batch_fractions
+                                
+                                # Si no quedan fracciones disponibles
+                                if available <= 0:
+                                    error_msg = f'No quedan fracciones disponibles para esta combinación'
+                                else:
+                                    error_msg = f'Solo quedan {available} fracciones disponibles para esta combinación'
+                                    
                                 validation_errors.append({
                                     'bet_data': bet_data,
-                                    'errors': [f'Solo quedan {available} fracciones disponibles para esta combinación']
+                                    'errors': [error_msg]
                                 })
                                 continue
                             
                             # Actualizar el contador si la validación pasó
                             fraction_counts[combination_key] = current_batch_fractions + fractions
+                            
+                            # Log adicional para verificar el conteo
+                            logger.info(f"VALIDACIÓN INICIAL: Lotería: {lottery.name}, Número: {number}, Serie: {series}")
+                            logger.info(f"Fracciones vendidas en BD: {sold_fractions}, Solicitadas en este lote hasta ahora: {current_batch_fractions}")
+                            logger.info(f"Fracciones pedidas en esta apuesta: {fractions}, Total después de esta apuesta: {new_total}")
+                            logger.info(f"Máximo permitido: {lottery.fraction_count}")
                             
                         except Lottery.DoesNotExist:
                             validation_errors.append({
@@ -720,7 +733,19 @@ class BetViewSet(GenericViewSet):
                         available_fractions = lottery.fraction_count - sold_fractions
                         logger.info(f"Fracciones disponibles: {available_fractions}")
                         
-                        # Verificar fracciones en el modelo
+                        # Verificar si hay suficientes fracciones disponibles
+                        if fractions > available_fractions:
+                            logger.error(f"Fracciones insuficientes. Solicitadas: {fractions}, Disponibles: {available_fractions}")
+                            return Response(
+                                {'error': f'Solo quedan {available_fractions} fracciones disponibles para esta combinación'},
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
+                        
+                        # Verificar si esta compra alcanzaría o superaría el límite máximo
+                        if sold_fractions + fractions >= lottery.fraction_count:
+                            logger.info("⚠️ Esta compra alcanzará o superará el límite máximo de fracciones")
+                        
+                        # Verificar fracciones en el modelo LotteryNumberCombination si existe
                         try:
                             from apps.lottery.models.lottery_number_combination import LotteryNumberCombination
                             combination = LotteryNumberCombination.objects.filter(
@@ -738,14 +763,6 @@ class BetViewSet(GenericViewSet):
                                 logger.info(f"  Disponibles: {combination.total_fractions - combination.used_fractions}")
                         except Exception as e:
                             logger.info(f"Error al buscar combinación: {str(e)}")
-                        
-                        # Verificar si hay suficientes fracciones disponibles
-                        if fractions > available_fractions:
-                            logger.error(f"Fracciones insuficientes. Solicitadas: {fractions}, Disponibles: {available_fractions}")
-                            return Response(
-                                {'error': f'Solo quedan {available_fractions} fracciones disponibles para esta combinación'},
-                                status=status.HTTP_400_BAD_REQUEST
-                            )
 
                         # Validar el resto de reglas
                         validation_result = validation_service.validate_bet_request(
@@ -787,6 +804,32 @@ class BetViewSet(GenericViewSet):
                                 user=request.user,
                                 lottery=lottery,
                                 status='PENDING'
+                            )
+                            logger.debug(f"Apuesta creada: {bet.id}")
+                            
+                            # Verificación crítica: comprobar si ya se alcanzó el límite después de esta compra
+                            # Esta es una protección adicional para evitar exceder el límite
+                            current_total = Bet.objects.filter(
+                                lottery=lottery,
+                                number=number,
+                                series=series,
+                                draw_date=next_draw_date,
+                                status='PENDING'
+                            ).aggregate(total=models.Sum('fractions'))['total'] or 0
+                            
+                            logger.info(f"DESPUÉS DE GUARDAR - Total fracciones para esta combinación: {current_total}/{lottery.fraction_count}")
+                            
+                            if current_total > lottery.fraction_count:
+                                logger.error(f"⚠️ ALERTA CRÍTICA: Se ha excedido el límite de fracciones: {current_total}/{lottery.fraction_count}")
+                            
+                            return Response(
+                                {
+                                    'message': 'Apuesta creada exitosamente',
+                                    'bet': serializer.data,
+                                    'amount': str(amount),
+                                    'new_balance': str(balance.balance)
+                                }, 
+                                status=status.HTTP_201_CREATED
                             )
                             logger.debug(f"Apuesta creada: {bet.id}")
                             
