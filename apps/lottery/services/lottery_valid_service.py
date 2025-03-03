@@ -18,13 +18,13 @@ class LotteryValidationService:
         self.validation_errors = []
 
     def validate_combination_fractions(self, number: str, series: str, fractions: int, next_draw_date, fraction_counts: dict) -> tuple[bool, int]:
-        # Generar una clave para esta combinación
-        combination_key = f"{self.lottery.name}-{number}-{series}-{next_draw_date}"
+        # Crear clave única para esta combinación
+        combination_key = f"{self.lottery.id}-{number}-{series}-{next_draw_date}"
         
-        # Obtener fracciones en el lote de transacciones actual
+        # Obtener fracciones ya procesadas en esta sesión/transacción
         current_batch_fractions = fraction_counts.get(combination_key, 0)
         
-        # Obtener fracciones existentes de la base de datos (ya compradas)
+        # Obtener todas las apuestas existentes para esta combinación
         existing_bets = Bet.objects.filter(
             lottery=self.lottery,
             number=number,
@@ -33,25 +33,29 @@ class LotteryValidationService:
             status='PENDING'
         )
         
+        # Calcular fracciones ya vendidas en la base de datos
         sold_fractions = existing_bets.aggregate(
             total=models.Sum('fractions')
         )['total'] or 0
         
-        # Total de fracciones usadas = fracciones en base de datos + fracciones en lote actual
+        # Total de fracciones utilizadas = vendidas + procesándose actualmente
         total_used_fractions = sold_fractions + current_batch_fractions
-        
-        # Verificar si todas las fracciones ya están usadas
-        if total_used_fractions >= self.lottery.fraction_count:
-            return False, 0
         
         # Calcular fracciones disponibles
         available = self.lottery.fraction_count - total_used_fractions
         
-        # Verificar si la nueva compra excede el límite
-        if fractions > available:
-            return False, available
+        # Si no hay fracciones disponibles
+        if available <= 0:
+            return False, 0
         
-        # Devolver verdadero y fracciones restantes DESPUÉS de esta compra
+        # Si se intenta comprar más de las disponibles
+        if fractions > available:
+            return False, available  # Devolver las disponibles
+        
+        # Si hay suficientes, actualizar contador de fracciones para esta sesión
+        fraction_counts[combination_key] = current_batch_fractions + fractions
+        
+        # Devolver éxito y fracciones restantes
         return True, available - fractions
 
     def get_available_numbers(self, series: str) -> List[str]:
