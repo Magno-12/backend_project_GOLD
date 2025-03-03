@@ -213,6 +213,17 @@ class Lottery(BaseModel):
             days_ahead += 7
 
         return today + timedelta(days=days_ahead)
+    
+    def update_next_draw_date(self):
+        """Actualizar next_draw_date a la próxima ocurrencia de draw_day"""
+        current_date = timezone.now().date()
+        
+        # Si next_draw_date está en el pasado o es hoy, calcular nueva fecha
+        if not self.next_draw_date or self.next_draw_date <= current_date:
+            self.next_draw_date = self.get_days_until_next_draw()
+            self.save(update_fields=['next_draw_date'])
+        
+        return self.next_draw_date
 
     def is_open_for_bets(self):
         """Verifica si la lotería está abierta para apuestas"""

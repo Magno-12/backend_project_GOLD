@@ -9,7 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.utils import timezone
-from django.db import transaction
+from django.db import transaction, models
 from decimal import Decimal
 
 from apps.lottery.models import Lottery, LotteryResult, Bet
@@ -490,31 +490,56 @@ class BetViewSet(GenericViewSet):
                             amount = Decimal(str(bet_data.get('amount')))
                             logger.debug(f"Detalles apuesta - Número: {number}, Serie: {series}, Fracciones: {fractions}")
 
-                            # Actualizar el conteo de fracciones para esta combinación
-                            combination_key = f"{lottery.name}-{number}-{series}-{next_draw_date}"
-                            existing_count = fraction_counts.get(combination_key, 0)
-                            logger.debug(f"Conteo actual para {combination_key}: {existing_count}")
-                            new_count = existing_count + fractions
-                            logger.debug(f"Nuevo conteo para {combination_key}: {new_count}")
-                            fraction_counts[combination_key] = new_count
-
-                            # Validar fracciones disponibles usando el servicio
-                            is_valid, remaining = validation_service.validate_combination_fractions(
-                                number, series, fractions,
-                                next_draw_date, fraction_counts
+                            # MODIFICACIÓN: Verificar fracciones disponibles de manera correcta
+                            # Primero obtener las apuestas existentes para esta combinación
+                            existing_bets = Bet.objects.filter(
+                                lottery=lottery,
+                                number=number,
+                                series=series,
+                                draw_date=next_draw_date,
+                                status='PENDING'
                             )
                             
-                            if not is_valid:
-                                logger.debug(f"Validación de fracciones falló. Restantes: {remaining}")
+                            # Calcular fracciones ya vendidas en la base de datos
+                            sold_fractions = existing_bets.aggregate(
+                                total=models.Sum('fractions')
+                            )['total'] or 0
+                            logger.debug(f"Fracciones ya vendidas en DB para {number}-{series}: {sold_fractions}")
+                            
+                            # Obtener fracciones en el lote actual
+                            combination_key = f"{lottery.name}-{number}-{series}-{next_draw_date}"
+                            current_batch_fractions = fraction_counts.get(combination_key, 0)
+                            logger.debug(f"Fracciones en lote actual para {combination_key}: {current_batch_fractions}")
+                            
+                            # Total usado = vendidas + en proceso actual
+                            total_used = sold_fractions + current_batch_fractions
+                            logger.debug(f"Total de fracciones usadas: {total_used}")
+                            
+                            # Verificar disponibilidad
+                            if total_used >= lottery.fraction_count:
+                                logger.error(f"No hay fracciones disponibles. Total usado: {total_used}, Límite: {lottery.fraction_count}")
                                 validation_errors.append({
                                     'bet_data': bet_data,
-                                    'errors': [
-                                        'No hay fracciones disponibles para esta combinación' 
-                                        if remaining == 0 else 
-                                        f'Solo quedan {remaining} fracciones disponibles para esta combinación'
-                                    ]
+                                    'errors': ['No hay fracciones disponibles para esta combinación']
                                 })
                                 continue
+                            
+                            # Calcular disponibles
+                            available = lottery.fraction_count - total_used
+                            logger.debug(f"Fracciones disponibles: {available}")
+                            
+                            # Verificar si la compra actual excede lo disponible
+                            if fractions > available:
+                                logger.error(f"Fracciones insuficientes. Solicitadas: {fractions}, Disponibles: {available}")
+                                validation_errors.append({
+                                    'bet_data': bet_data,
+                                    'errors': [f'Solo quedan {available} fracciones disponibles para esta combinación']
+                                })
+                                continue
+                            
+                            # Actualizar contador de fracciones para esta solicitud
+                            fraction_counts[combination_key] = current_batch_fractions + fractions
+                            logger.debug(f"Contador actualizado para {combination_key}: {fraction_counts[combination_key]}")
 
                             # Validar el resto de reglas
                             validation_result = validation_service.validate_bet_request(
@@ -621,17 +646,54 @@ class BetViewSet(GenericViewSet):
                         fractions = bet_data.get('fractions', 1)
                         amount = Decimal(str(bet_data.get('amount')))
 
-                        # Verificar fracciones disponibles
-                        is_valid, remaining = validation_service.validate_combination_fractions(
-                            number, series, fractions,
-                            next_draw_date, fraction_counts
+                        # MODIFICACIÓN: Verificar fracciones disponibles de manera correcta
+                        # Primero obtener las apuestas existentes para esta combinación
+                        existing_bets = Bet.objects.filter(
+                            lottery=lottery,
+                            number=number,
+                            series=series,
+                            draw_date=next_draw_date,
+                            status='PENDING'
                         )
                         
-                        if not is_valid:
+                        # Calcular fracciones ya vendidas en la base de datos
+                        sold_fractions = existing_bets.aggregate(
+                            total=models.Sum('fractions')
+                        )['total'] or 0
+                        logger.debug(f"Fracciones ya vendidas en DB para {number}-{series}: {sold_fractions}")
+                        
+                        # Obtener fracciones en el lote actual
+                        combination_key = f"{lottery.name}-{number}-{series}-{next_draw_date}"
+                        current_batch_fractions = fraction_counts.get(combination_key, 0)
+                        logger.debug(f"Fracciones en lote actual para {combination_key}: {current_batch_fractions}")
+                        
+                        # Total usado = vendidas + en proceso actual
+                        total_used = sold_fractions + current_batch_fractions
+                        logger.debug(f"Total de fracciones usadas: {total_used}")
+                        
+                        # Verificar disponibilidad
+                        if total_used >= lottery.fraction_count:
+                            logger.error(f"No hay fracciones disponibles. Total usado: {total_used}, Límite: {lottery.fraction_count}")
                             return Response(
-                                {'error': f'Solo quedan {remaining} fracciones disponibles para esta combinación'},
+                                {'error': 'No hay fracciones disponibles para esta combinación'},
                                 status=status.HTTP_400_BAD_REQUEST
                             )
+                        
+                        # Calcular disponibles
+                        available = lottery.fraction_count - total_used
+                        logger.debug(f"Fracciones disponibles: {available}")
+                        
+                        # Verificar si la compra actual excede lo disponible
+                        if fractions > available:
+                            logger.error(f"Fracciones insuficientes. Solicitadas: {fractions}, Disponibles: {available}")
+                            return Response(
+                                {'error': f'Solo quedan {available} fracciones disponibles para esta combinación'},
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
+                        
+                        # Actualizar contador de fracciones para esta solicitud
+                        fraction_counts[combination_key] = current_batch_fractions + fractions
+                        logger.debug(f"Contador actualizado para {combination_key}: {fraction_counts[combination_key]}")
 
                         # Validar el resto de reglas
                         validation_result = validation_service.validate_bet_request(
