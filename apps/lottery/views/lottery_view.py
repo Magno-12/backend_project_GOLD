@@ -600,10 +600,11 @@ class BetViewSet(GenericViewSet):
                                 )
                             
                             # Verificar que esta apuesta específica no exceda lo que queda disponible
-                            if fractions > (lottery.fraction_count - total_with_batch):
+                            # CORRECCIÓN: Cambiamos la condición para permitir comprar exactamente hasta el límite
+                            if fractions > lottery.fraction_count - sold_fractions:
                                 logger.error(f"Error: La apuesta excede las fracciones disponibles")
                                 return Response(
-                                    {'error': f'No hay suficientes fracciones disponibles. Máximo disponible: {lottery.fraction_count - total_with_batch}'},
+                                    {'error': f'No hay suficientes fracciones disponibles. Máximo disponible: {lottery.fraction_count - sold_fractions}'},
                                     status=status.HTTP_400_BAD_REQUEST
                                 )
 
