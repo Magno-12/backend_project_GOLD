@@ -20,39 +20,65 @@ class LotteryValidationService:
     def validate_combination_fractions(self, number: str, series: str, fractions: int, next_draw_date, fraction_counts=None) -> tuple[bool, int]:
         """
         Valida si hay suficientes fracciones disponibles para una combinación.
+        Retorna (es_válido, fracciones_disponibles_restantes)
         """
-        from django.db.models import Sum
+        from django.db import models, transaction
+        import logging
         
-        # Obtener todas las apuestas existentes para esta combinación
-        existing_bets = Bet.objects.filter(
-            lottery=self.lottery,
-            number=number,
-            series=series,
-            draw_date=next_draw_date,
-            status='PENDING'
-        )
+        logger = logging.getLogger(__name__)  # Corregido el nombre del logger
         
-        # Calcular el total de fracciones ya vendidas
-        sold_fractions = existing_bets.aggregate(
-            total=Sum('fractions')
-        )['total'] or 0
-        
-        # Número máximo de fracciones permitidas para esta lotería
-        max_fractions = self.lottery.fraction_count
-        
-        # Calcular fracciones disponibles
-        available_fractions = max_fractions - sold_fractions
-        
-        # Si no quedan fracciones disponibles
-        if available_fractions <= 0:
-            return False, 0
-        
-        # Si piden más de las disponibles
-        if fractions > available_fractions:
-            return False, available_fractions
-        
-        # Si hay suficientes, devolver válido
-        return True, available_fractions - fractions
+        with transaction.atomic():
+            # Obtener todas las apuestas existentes para esta combinación con bloqueo
+            existing_bets = Bet.objects.filter(
+                lottery=self.lottery,
+                number=number,
+                series=series,
+                draw_date=next_draw_date
+            ).filter(
+                status__in=['PENDING', 'PLAYED', 'WON']  # Incluimos todos los estados relevantes
+            ).select_for_update()
+            
+            # Calcular el total de fracciones ya vendidas manualmente
+            sold_fractions = 0
+            for bet in existing_bets:
+                sold_fractions += bet.fractions
+            
+            # Loguea cada apuesta encontrada para debugging
+            logger.info(f"Apuestas encontradas para {self.lottery.name}, {number}-{series}:")
+            for bet in existing_bets:
+                logger.info(f"  ID: {bet.id}, Fracciones: {bet.fractions}, Estado: {bet.status}, Fecha sorteo: {bet.draw_date}")
+            
+            # Número máximo de fracciones permitidas para esta lotería
+            max_fractions = self.lottery.fraction_count
+            
+            # Calcular fracciones disponibles
+            available_fractions = max_fractions - sold_fractions
+            
+            # Registrar información detallada
+            logger.info(
+                f"Validación fracciones: {self.lottery.name}, {number}-{series}: "
+                f"Vendidas={sold_fractions}, Disponibles={available_fractions}, "
+                f"Solicitadas={fractions}, Máximo={max_fractions}"
+            )
+            
+            # Si no quedan fracciones disponibles
+            if available_fractions <= 0:
+                logger.warning(
+                    f"Sin fracciones disponibles: {self.lottery.name}, {number}-{series}: "
+                    f"Vendidas={sold_fractions}/{max_fractions}"
+                )
+                return False, 0
+            
+            # Si piden más de las disponibles
+            if fractions > available_fractions:
+                logger.warning(
+                    f"Fracciones insuficientes: {self.lottery.name}, {number}-{series}: "
+                    f"Solicitadas={fractions}, Disponibles={available_fractions}"
+                )
+                return False, available_fractions
+            
+            # Si hay suficientes, devolver válido y cuántas quedarían
+            return True, available_fractions - fractions
 
     def get_available_numbers(self, series: str) -> List[str]:
         """Obtiene números disponibles en una serie"""

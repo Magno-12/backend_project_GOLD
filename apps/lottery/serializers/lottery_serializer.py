@@ -43,7 +43,8 @@ class BetSerializer(serializers.ModelSerializer):
             'draw_date',
             'status',
             'created_at',
-            'result'
+            'result',
+            'fractions'
         ]
         read_only_fields = ['status', 'lottery_name']
 
