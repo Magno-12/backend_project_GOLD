@@ -717,7 +717,8 @@ class BetViewSet(GenericViewSet):
                         bet = data['serializer'].save(
                             user=request.user,
                             lottery=data['lottery'],
-                            status='PENDING'
+                            status='PENDING',
+                            fractions=bet_data.get('fractions', 1)  # Asegurarse de que las fracciones se guarden correctamente
                         )
                         created_bets.append(bet)
                         logger.debug(f"Apuesta creada: {bet.id}")
