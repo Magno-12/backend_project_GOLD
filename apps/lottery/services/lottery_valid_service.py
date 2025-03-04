@@ -17,25 +17,42 @@ class LotteryValidationService:
         self.lottery = lottery
         self.validation_errors = []
 
-    def validate_combination_fractions(self, number: str, series: str, fractions: int, next_draw_date, fraction_counts=None) -> tuple[bool, int]:
-        """
-        Valida si hay suficientes fracciones disponibles para una combinación.
-        """
-        from django.db.models import Sum
-        
-        # Obtener todas las apuestas existentes para esta combinación
+
+def validate_combination_fractions(self, number: str, series: str, fractions: int, next_draw_date, fraction_counts=None) -> tuple[bool, int]:
+    """
+    Valida si hay suficientes fracciones disponibles para una combinación.
+    Retorna (es_válido, fracciones_disponibles_restantes)
+    """
+    from django.db import models, transaction
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    with transaction.atomic():
+        # Obtener todas las apuestas existentes para esta combinación con bloqueo
         existing_bets = Bet.objects.filter(
             lottery=self.lottery,
             number=number,
             series=series,
             draw_date=next_draw_date,
             status='PENDING'
-        )
+        ).select_for_update()
         
         # Calcular el total de fracciones ya vendidas
         sold_fractions = existing_bets.aggregate(
-            total=Sum('fractions')
+            total=models.Sum('fractions')
         )['total'] or 0
+        
+        # Verificación manual para detectar inconsistencias
+        manual_sum = sum(bet.fractions for bet in existing_bets)
+        if sold_fractions != manual_sum:
+            logger.critical(
+                f"INCONSISTENCIA CRÍTICA EN FRACCIONES: "
+                f"{self.lottery.name}, {number}-{series}: "
+                f"Aggregate={sold_fractions}, Manual={manual_sum}"
+            )
+            # Usar el valor mayor por seguridad
+            sold_fractions = max(sold_fractions, manual_sum)
         
         # Número máximo de fracciones permitidas para esta lotería
         max_fractions = self.lottery.fraction_count
@@ -43,15 +60,30 @@ class LotteryValidationService:
         # Calcular fracciones disponibles
         available_fractions = max_fractions - sold_fractions
         
+        # Registrar información detallada
+        logger.info(
+            f"Validación fracciones: {self.lottery.name}, {number}-{series}: "
+            f"Vendidas={sold_fractions}, Disponibles={available_fractions}, "
+            f"Solicitadas={fractions}, Máximo={max_fractions}"
+        )
+        
         # Si no quedan fracciones disponibles
         if available_fractions <= 0:
+            logger.warning(
+                f"Sin fracciones disponibles: {self.lottery.name}, {number}-{series}: "
+                f"Vendidas={sold_fractions}/{max_fractions}"
+            )
             return False, 0
         
         # Si piden más de las disponibles
         if fractions > available_fractions:
+            logger.warning(
+                f"Fracciones insuficientes: {self.lottery.name}, {number}-{series}: "
+                f"Solicitadas={fractions}, Disponibles={available_fractions}"
+            )
             return False, available_fractions
         
-        # Si hay suficientes, devolver válido
+        # Si hay suficientes, devolver válido y cuántas quedarían
         return True, available_fractions - fractions
 
     def get_available_numbers(self, series: str) -> List[str]:
