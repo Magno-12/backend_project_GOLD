@@ -25,7 +25,7 @@ class LotteryValidationService:
         from django.db import models, transaction
         import logging
         
-        logger = logging.getLogger(__name__)
+        logger = logging.getLogger(__name__)  # Corregido el nombre del logger
         
         with transaction.atomic():
             # Obtener todas las apuestas existentes para esta combinación con bloqueo
@@ -33,25 +33,20 @@ class LotteryValidationService:
                 lottery=self.lottery,
                 number=number,
                 series=series,
-                draw_date=next_draw_date,
-                status='PENDING'
+                draw_date=next_draw_date
+            ).filter(
+                status__in=['PENDING', 'PLAYED', 'WON']  # Incluimos todos los estados relevantes
             ).select_for_update()
             
-            # Calcular el total de fracciones ya vendidas
-            sold_fractions = existing_bets.aggregate(
-                total=models.Sum('fractions')
-            )['total'] or 0
+            # Calcular el total de fracciones ya vendidas manualmente
+            sold_fractions = 0
+            for bet in existing_bets:
+                sold_fractions += bet.fractions
             
-            # Verificación manual para detectar inconsistencias
-            manual_sum = sum(bet.fractions for bet in existing_bets)
-            if sold_fractions != manual_sum:
-                logger.critical(
-                    f"INCONSISTENCIA CRÍTICA EN FRACCIONES: "
-                    f"{self.lottery.name}, {number}-{series}: "
-                    f"Aggregate={sold_fractions}, Manual={manual_sum}"
-                )
-                # Usar el valor mayor por seguridad
-                sold_fractions = max(sold_fractions, manual_sum)
+            # Loguea cada apuesta encontrada para debugging
+            logger.info(f"Apuestas encontradas para {self.lottery.name}, {number}-{series}:")
+            for bet in existing_bets:
+                logger.info(f"  ID: {bet.id}, Fracciones: {bet.fractions}, Estado: {bet.status}, Fecha sorteo: {bet.draw_date}")
             
             # Número máximo de fracciones permitidas para esta lotería
             max_fractions = self.lottery.fraction_count

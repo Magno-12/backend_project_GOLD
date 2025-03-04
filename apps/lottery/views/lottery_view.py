@@ -495,20 +495,20 @@ class BetViewSet(GenericViewSet):
                                 lottery=lottery,
                                 number=number,
                                 series=series,
-                                draw_date=next_draw_date,
-                                status='PENDING'
+                                draw_date=next_draw_date
+                            ).filter(
+                                status__in=['PENDING', 'PLAYED', 'WON']  # Incluimos todos los estados relevantes
                             ).select_for_update()
                             
-                            sold_fractions = existing_bets.aggregate(
-                                total=models.Sum('fractions')
-                            )['total'] or 0
+                            # Calcular el total de fracciones ya vendidas manualmente
+                            sold_fractions = 0
+                            for bet in existing_bets:
+                                sold_fractions += bet.fractions
                             
-                            # Verificación manual para comparar
-                            manual_sum = sum(bet.fractions for bet in existing_bets)
-                            if manual_sum != sold_fractions:
-                                logger.warning(f"Discrepancia en suma de fracciones: Aggregate={sold_fractions}, Manual={manual_sum}")
-                                # Usar el valor mayor por seguridad
-                                sold_fractions = max(sold_fractions, manual_sum)
+                            # Loguea cada apuesta encontrada para debugging
+                            logger.info(f"Apuestas encontradas para {lottery.name}, {number}-{series}:")
+                            for bet in existing_bets:
+                                logger.info(f"  ID: {bet.id}, Fracciones: {bet.fractions}, Estado: {bet.status}, Fecha sorteo: {bet.draw_date}")
                             
                             # Obtener fracciones solicitadas previamente en este lote
                             current_batch_fractions = fraction_counts.get(combination_key, 0)
@@ -588,23 +588,24 @@ class BetViewSet(GenericViewSet):
                                 lottery=lottery,
                                 number=number,
                                 series=series,
-                                draw_date=next_draw_date,
-                                status='PENDING'
+                                draw_date=next_draw_date
+                            ).filter(
+                                status__in=['PENDING', 'PLAYED', 'WON']
                             ).select_for_update()
                             
-                            sold_fractions = existing_bets.aggregate(
-                                total=models.Sum('fractions')
-                            )['total'] or 0
-                            manual_sum = sum(bet.fractions for bet in existing_bets)
+                            # Calcular el total de fracciones ya vendidas manualmente
+                            sold_fractions = 0
+                            for bet in existing_bets:
+                                sold_fractions += bet.fractions
                             
-                            # Si hay discrepancia, usar el valor mayor
-                            if sold_fractions != manual_sum:
-                                logger.critical(f"INCONSISTENCIA EN SUMA: Aggregate={sold_fractions}, Manual={manual_sum}")
-                                sold_fractions = max(sold_fractions, manual_sum)
+                            # Loguea cada apuesta encontrada para debugging
+                            logger.info(f"Doble verificación - Apuestas encontradas para {lottery.name}, {number}-{series}:")
+                            for bet in existing_bets:
+                                logger.info(f"  ID: {bet.id}, Fracciones: {bet.fractions}, Estado: {bet.status}, Fecha sorteo: {bet.draw_date}")
                             
                             available = lottery.fraction_count - sold_fractions
                             
-                            logger.info(f"Doble verificación - Fracciones vendidas: {sold_fractions} (manual: {manual_sum})")
+                            logger.info(f"Doble verificación - Fracciones vendidas: {sold_fractions}")
                             logger.info(f"Doble verificación - Fracciones disponibles: {available}")
                             
                             # Verificar el acumulado del batch en este punto
@@ -629,19 +630,39 @@ class BetViewSet(GenericViewSet):
                                     status=status.HTTP_400_BAD_REQUEST
                                 )
 
-                            # Validar el resto de reglas
-                            validation_result = validation_service.validate_bet_request(
-                                user=request.user,
-                                number=number,
-                                series=series,
-                                fractions=fractions,
-                                amount=amount
-                            )
-
-                            if not validation_result['is_valid']:
+                            # Validar el resto de reglas del negocio
+                            if not validation_service.validate_number_format(number):
                                 validation_errors.append({
                                     'bet_data': bet_data,
-                                    'errors': validation_result['errors']
+                                    'errors': ["Número inválido"]
+                                })
+                                continue
+
+                            if not validation_service.validate_series_format(series):
+                                validation_errors.append({
+                                    'bet_data': bet_data,
+                                    'errors': ["Serie inválida"]
+                                })
+                                continue
+
+                            if not validation_service.validate_bet_amount(amount, fractions):
+                                validation_errors.append({
+                                    'bet_data': bet_data,
+                                    'errors': [f"Monto inválido para {fractions} fracciones"]
+                                })
+                                continue
+
+                            if not validation_service.validate_user_balance(request.user, amount):
+                                validation_errors.append({
+                                    'bet_data': bet_data,
+                                    'errors': ["Saldo insuficiente"]
+                                })
+                                continue
+
+                            if not validation_service.validate_bet_limits(amount):
+                                validation_errors.append({
+                                    'bet_data': bet_data,
+                                    'errors': ["Monto fuera de los límites permitidos"]
                                 })
                                 continue
 
@@ -707,32 +728,35 @@ class BetViewSet(GenericViewSet):
                         series = bet.series
                         draw_date = bet.draw_date
                         
-                        # Verificación crítica final para cada apuesta guardada
-                        current_total = Bet.objects.filter(
+                        # Verificación final crítica después de guardar
+                        all_bets = Bet.objects.filter(
                             lottery=lottery,
                             number=number,
                             series=series,
-                            draw_date=draw_date,
-                            status='PENDING'
-                        ).aggregate(total=models.Sum('fractions'))['total'] or 0
+                            draw_date=draw_date
+                        ).filter(
+                            status__in=['PENDING', 'PLAYED', 'WON']
+                        )
+                        total_fractions = sum(b.fractions for b in all_bets)
+                        logger.info(f"DESPUÉS DE GUARDAR - {lottery.name}, {number}, {series}: {total_fractions}/{lottery.fraction_count}")
                         
-                        logger.info(f"DESPUÉS DE GUARDAR - {lottery.name}, {number}, {series}: {current_total}/{lottery.fraction_count}")
-                        
-                        if current_total > lottery.fraction_count:
-                            logger.error(f"⚠️ ALERTA CRÍTICA: Se ha excedido el límite de fracciones: {current_total}/{lottery.fraction_count}")
+                        if total_fractions > lottery.fraction_count:
+                            logger.critical(f"⚠️ ALERTA CRÍTICA: Se ha excedido el límite de fracciones: {total_fractions}/{lottery.fraction_count}")
                     
                     # Verificación final de límites de fracciones
                     for lottery_data in set((bet.lottery_id, bet.number, bet.series, bet.draw_date) for bet in created_bets):
                         lottery_id, number, series, draw_date = lottery_data
                         
                         # Obtener el total de fracciones para esta combinación
-                        total_fractions = Bet.objects.filter(
+                        all_bets = Bet.objects.filter(
                             lottery_id=lottery_id,
                             number=number,
                             series=series,
-                            draw_date=draw_date,
-                            status='PENDING'
-                        ).aggregate(total=models.Sum('fractions'))['total'] or 0
+                            draw_date=draw_date
+                        ).filter(
+                            status__in=['PENDING', 'PLAYED', 'WON']
+                        )
+                        total_fractions = sum(b.fractions for b in all_bets)
                         
                         # Obtener el máximo permitido
                         max_fractions = Lottery.objects.get(id=lottery_id).fraction_count
@@ -790,9 +814,15 @@ class BetViewSet(GenericViewSet):
                             lottery=lottery,
                             number=number,
                             series=series,
-                            draw_date=next_draw_date,
-                            status='PENDING'
-                        ).select_for_update()  # Bloquea las filas durante la transacción
+                            draw_date=next_draw_date
+                        ).filter(
+                            status__in=['PENDING', 'PLAYED', 'WON']
+                        ).select_for_update()
+                        
+                        # Calcular el total de fracciones ya vendidas manualmente
+                        sold_fractions = 0
+                        for bet in existing_bets:
+                            sold_fractions += bet.fractions
                         
                         # Log detallado de las apuestas existentes
                         logger.info(f"===== VERIFICACIÓN DE FRACCIONES =====")
@@ -803,23 +833,9 @@ class BetViewSet(GenericViewSet):
                         # Log de apuestas existentes
                         logger.info(f"Apuestas existentes para esta combinación:")
                         for bet in existing_bets:
-                            logger.info(f"  ID: {bet.id}, Fracciones: {bet.fractions}, Usuario: {bet.user.id}, Fecha creación: {bet.created_at}")
+                            logger.info(f"  ID: {bet.id}, Fracciones: {bet.fractions}, Estado: {bet.status}, Usuario: {bet.user.id}, Fecha creación: {bet.created_at}")
                         
-                        # Calcular fracciones ya vendidas en la base de datos
-                        sold_fractions = existing_bets.aggregate(
-                            total=models.Sum('fractions')
-                        )['total'] or 0
-                        logger.info(f"Fracciones ya vendidas (según suma): {sold_fractions} de {lottery.fraction_count}")
-                        
-                        # Verificación manual del total (para comparar con el aggregate)
-                        manual_sum = sum(bet.fractions for bet in existing_bets)
-                        logger.info(f"Fracciones ya vendidas (suma manual): {manual_sum}")
-                        
-                        # Si hay discrepancia, es un problema serio
-                        if manual_sum != sold_fractions:
-                            logger.error(f"¡DISCREPANCIA EN LA SUMA DE FRACCIONES! Aggregate: {sold_fractions}, Manual: {manual_sum}")
-                            # Usar el valor mayor por seguridad
-                            sold_fractions = max(sold_fractions, manual_sum)
+                        logger.info(f"Fracciones ya vendidas: {sold_fractions} de {lottery.fraction_count}")
                         
                         # Calcular fracciones disponibles
                         available_fractions = lottery.fraction_count - sold_fractions
@@ -845,20 +861,21 @@ class BetViewSet(GenericViewSet):
                         if sold_fractions + fractions >= lottery.fraction_count:
                             logger.info("⚠️ Esta compra alcanzará el límite máximo de fracciones")
                         
-                        # Validar el resto de reglas
-                        validation_result = validation_service.validate_bet_request(
-                            user=request.user,
-                            number=number,
-                            series=series,
-                            fractions=fractions,
-                            amount=amount
-                        )
+                        # Validar el resto de reglas del negocio
+                        if not validation_service.validate_number_format(number):
+                            return Response({'error': "Número inválido"}, status=status.HTTP_400_BAD_REQUEST)
 
-                        if not validation_result['is_valid']:
-                            return Response(
-                                {'error': validation_result['errors'][0]},
-                                status=status.HTTP_400_BAD_REQUEST
-                            )
+                        if not validation_service.validate_series_format(series):
+                            return Response({'error': "Serie inválida"}, status=status.HTTP_400_BAD_REQUEST)
+
+                        if not validation_service.validate_bet_amount(amount, fractions):
+                            return Response({'error': f"Monto inválido para {fractions} fracciones"}, status=status.HTTP_400_BAD_REQUEST)
+
+                        if not validation_service.validate_user_balance(request.user, amount):
+                            return Response({'error': "Saldo insuficiente"}, status=status.HTTP_400_BAD_REQUEST)
+
+                        if not validation_service.validate_bet_limits(amount):
+                            return Response({'error': "Monto fuera de los límites permitidos"}, status=status.HTTP_400_BAD_REQUEST)
 
                         serializer = self.get_serializer(data=bet_data)
                         if serializer.is_valid():
@@ -888,20 +905,20 @@ class BetViewSet(GenericViewSet):
                             )
                             logger.debug(f"Apuesta creada: {bet.id}")
                             
-                            # Verificación crítica: comprobar si ya se alcanzó el límite después de esta compra
-                            # Esta es una protección adicional para evitar exceder el límite
-                            current_total = Bet.objects.filter(
+                            # Verificación final crítica después de guardar
+                            all_bets = Bet.objects.filter(
                                 lottery=lottery,
                                 number=number,
                                 series=series,
-                                draw_date=next_draw_date,
-                                status='PENDING'
-                            ).aggregate(total=models.Sum('fractions'))['total'] or 0
+                                draw_date=next_draw_date
+                            ).filter(
+                                status__in=['PENDING', 'PLAYED', 'WON']
+                            )
+                            total_fractions = sum(b.fractions for b in all_bets)
+                            logger.info(f"DESPUÉS DE GUARDAR - Total fracciones para esta combinación: {total_fractions}/{lottery.fraction_count}")
                             
-                            logger.info(f"DESPUÉS DE GUARDAR - Total fracciones para esta combinación: {current_total}/{lottery.fraction_count}")
-                            
-                            if current_total > lottery.fraction_count:
-                                logger.critical(f"⚠️ ALERTA CRÍTICA: Se ha excedido el límite de fracciones: {current_total}/{lottery.fraction_count}")
+                            if total_fractions > lottery.fraction_count:
+                                logger.critical(f"⚠️ ALERTA CRÍTICA: Se ha excedido el límite de fracciones: {total_fractions}/{lottery.fraction_count}")
                             
                             return Response(
                                 {
