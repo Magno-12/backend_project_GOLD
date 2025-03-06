@@ -6,6 +6,7 @@ from django.utils.html import format_html
 from django.forms import TextInput
 from django.utils import timezone
 from django.db.models import Sum, Count
+from django.db import transaction
 import cloudinary
 import cloudinary.uploader
 import csv
@@ -13,7 +14,15 @@ import pytz
 from datetime import datetime, time
 from io import TextIOWrapper
 from datetime import datetime
-from .models import Lottery, Bet, LotteryResult, Prize, PrizePlan, PrizeType, LotteryNumberCombination
+from io import StringIO
+import json
+import pandas as pd
+from django import forms
+
+from .models import (
+    Lottery, Bet, LotteryResult, Prize, PrizePlan, 
+    PrizeType, LotteryNumberCombination
+)
 
 
 @admin.register(Lottery)
@@ -280,81 +289,85 @@ class LotteryAdmin(admin.ModelAdmin):
                 return
 
             try:
-                # Procesar CSV usando pandas
-                df = pd.read_csv(csv_file, dtype={
-                    '5100': str,  # número
-                    '001': str,   # serie
-                    '175': int,   # fracciones (opcional)
-                    '0000': str   # otro campo si existe
-                })
+                # Procesar CSV
+                csv_content = csv_file.read().decode('utf-8')
+                csv_reader = csv.reader(StringIO(csv_content))
                 
+                # Conjunto para almacenar series únicas
+                unique_series = set(lottery.available_series) if lottery.available_series else set()
+                
+                # Lista para almacenar combinaciones
+                combinations = []
+                
+                # Contador de filas procesadas
                 processed = 0
-                errors = []
                 
                 with transaction.atomic():
-                    # Desactivar combinaciones anteriores
-                    LotteryNumberCombination.objects.filter(
-                        lottery=lottery,
-                        draw_date=lottery.next_draw_date
-                    ).update(is_active=False)
+                    # Saltamos la cabecera si existe
+                    next(csv_reader, None)
                     
-                    for index, row in df.iterrows():
-                        try:
-                            number = str(row['5100']).zfill(4)
-                            series = str(row['001']).zfill(3)
+                    for row in csv_reader:
+                        if len(row) >= 4:  # Verificamos que haya al menos 4 columnas
+                            # Columna 3 (índice 2) contiene las series
+                            series = row[2].strip()
+                            # Columna 4 (índice 3) contiene los números
+                            number = row[3].strip()
                             
-                            if not (number.isdigit() and len(number) == 4):
-                                errors.append(f"Fila {index + 2}: Número inválido {number}")
-                                continue
-                                
-                            if not (series.isdigit() and len(series) == 3):
-                                errors.append(f"Fila {index + 2}: Serie inválida {series}")
-                                continue
+                            # Asegurar que la serie tenga 3 dígitos
+                            series = series.zfill(3)
                             
-                            combination, created = LotteryNumberCombination.objects.update_or_create(
-                                lottery=lottery,
-                                number=number,
-                                series=series,
-                                draw_date=lottery.next_draw_date,
-                                defaults={
-                                    'total_fractions': lottery.fraction_count,
-                                    'used_fractions': 0,
-                                    'is_active': True
-                                }
-                            )
+                            # Asegurar que el número tenga 4 dígitos
+                            number = number.zfill(4)
+                            
+                            # Añadir la serie al conjunto de series únicas
+                            unique_series.add(series)
+                            
+                            # Añadir la combinación a la lista
+                            combinations.append({
+                                "series": series,
+                                "number": number
+                            })
                             processed += 1
-                            
-                        except Exception as e:
-                            errors.append(f"Error en fila {index + 2}: {str(e)}")
+                    
+                    # Crear el JSON de combinaciones
+                    combinations_json = {
+                        "lottery_id": str(lottery.id),
+                        "lottery_name": lottery.name,
+                        "total_combinations": len(combinations),
+                        "combinations": combinations
+                    }
+                    
+                    # Actualizar el modelo Lottery
+                    lottery.valid_combinations_json = combinations_json
+                    lottery.available_series = list(unique_series)
+                    lottery.save()
                 
-                if errors:
-                    self.message_user(
-                        request,
-                        f'Proceso completado con {len(errors)} errores. '
-                        f'Se procesaron {processed} combinaciones correctamente.',
-                        level=messages.WARNING
-                    )
-                else:
-                    self.message_user(
-                        request,
-                        f'Se procesaron {processed} combinaciones correctamente.',
-                        level=messages.SUCCESS
-                    )
+                self.message_user(
+                    request,
+                    f'Se han procesado {processed} combinaciones correctamente. '
+                    f'Se actualizaron {len(unique_series)} series disponibles.',
+                    level=messages.SUCCESS
+                )
                     
             except Exception as e:
                 self.message_user(request, f'Error procesando archivo: {str(e)}', level=messages.ERROR)
             return
 
         # Mostrar formulario de carga usando el intermediario de Django
-        form = CsvImportForm()
-        return self.admin_site.admin_view(lambda r: HttpResponse('''
+        return HttpResponse(
+            f'''
+            <h1>Procesar CSV de Combinaciones para: {lottery.name}</h1>
+            <p>Seleccione un archivo CSV con las combinaciones de series y números.</p>
+            <p>El formato esperado es: 4 columnas, donde la tercera columna contiene las series y la cuarta columna contiene los números.</p>
             <form method="post" enctype="multipart/form-data">
                 <input type="hidden" name="_process_csv" value="1">
                 <input type="file" name="csv_file" accept=".csv" required>
+                <p>El archivo debe contener: 4 columnas con series en la tercera y números en la cuarta</p>
                 <input type="submit" value="Procesar CSV">
-                <input type="hidden" name="csrfmiddlewaretoken" value="{}">
+                <input type="hidden" name="csrfmiddlewaretoken" value="{request.CSRF_TOKEN}">
             </form>
-        '''.format(request.CSRF_TOKEN)))(request)
+            '''
+        )
 
     process_combinations_csv.short_description = "Procesar CSV de combinaciones"
 
@@ -429,12 +442,14 @@ class BetAdmin(admin.ModelAdmin):
     search_fields = ('user__phone_number', 'number', 'series')
     readonly_fields = ('won_amount', 'winning_details')
 
+
 @admin.register(LotteryResult)
 class LotteryResultAdmin(admin.ModelAdmin):
     list_display = ('lottery', 'fecha', 'numero', 'numero_serie')
     list_filter = ('lottery', 'fecha')
     search_fields = ('numero', 'numero_serie')
     readonly_fields = ('premios_secos',)
+
 
 @admin.register(Prize)
 class PrizeAdmin(admin.ModelAdmin):
@@ -448,7 +463,8 @@ class PrizeAdmin(admin.ModelAdmin):
             obj.fraction_amount = obj.amount / obj.prize_plan.lottery.fraction_count
         super().save_model(request, obj, form, change)
 
-@admin.register(PrizePlan)  # Registrar el modelo correcto
+
+@admin.register(PrizePlan)
 class PrizePlanAdmin(admin.ModelAdmin):
     list_display = ['lottery', 'name', 'start_date', 'is_active', 'last_updated']
     actions = ['upload_plan_file']
@@ -472,6 +488,7 @@ class PrizePlanAdmin(admin.ModelAdmin):
                 self.message_user(request, f"Plan actualizado para {plan.lottery.name}")
             except Exception as e:
                 self.message_user(request, f"Error: {str(e)}", level=messages.ERROR)
+
 
 @admin.register(PrizeType)
 class PrizeTypeAdmin(admin.ModelAdmin):
