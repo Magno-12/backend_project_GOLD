@@ -165,6 +165,15 @@ class Lottery(BaseModel):
         help_text='Archivo CSV con combinaciones de números y series'
     )
 
+    prize_plan_file = CloudinaryField(
+        'Archivo de plan de premios',
+        folder='lottery/prize_plans/',
+        resource_type='auto',
+        null=True,
+        blank=True,
+        help_text='Archivo PDF o imagen del plan de premios actual'
+    )
+
     def validate_number_in_range(self, number: str) -> bool:
         """Valifica si el número está dentro del rango permitido"""
         try:

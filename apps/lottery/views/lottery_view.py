@@ -335,7 +335,8 @@ class LotteryResultViewSet(GenericViewSet):
                     "fraction_value": str(lottery.fraction_price),
                     "number_fractions": str(lottery.fraction_count),
                     "sorteo": str(lottery.last_draw_number + 1),
-                    "series": lottery.available_series or []  # Series definidas en el admin
+                    "series": lottery.available_series or [],  # Series definidas en el admin
+                    "prize_plan_file": lottery.prize_plan_file.url if lottery.prize_plan_file else None
                 }
                 lottery_data.append(lottery_info)
 

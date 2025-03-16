@@ -79,7 +79,8 @@ class LotteryAdmin(admin.ModelAdmin):
         }),
         ('Configuración de Sorteos', {
             'fields': (
-                'closing_time', 'last_draw_number', 'next_draw_date'
+                'closing_time', 'last_draw_number', 'next_draw_date',
+                'prize_plan_file'
             )
         }),
         ('Configuración de Números', {
