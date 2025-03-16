@@ -156,12 +156,13 @@ class Lottery(BaseModel):
         blank=True
     )
 
-    # Nuevo campo para almacenar las combinaciones válidas
-    valid_combinations_json = models.JSONField(
-        'Combinaciones válidas',
-        default=dict,
+    combinations_file = CloudinaryField(
+        'Archivo de combinaciones',
+        folder='lottery/combinations/',
+        resource_type='raw',
+        null=True,
         blank=True,
-        help_text='Combinaciones serie-número válidas para esta lotería'
+        help_text='Archivo CSV con combinaciones de números y series'
     )
 
     def validate_number_in_range(self, number: str) -> bool:

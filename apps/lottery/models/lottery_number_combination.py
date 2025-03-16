@@ -45,6 +45,34 @@ class LotteryNumberCombination(models.Model):
         'Fecha del sorteo',
         null=True
     )
+    # Añadir el campo is_winner con un valor predeterminado
+    is_winner = models.BooleanField(
+        'Es ganadora',
+        default=False,
+        help_text='Indica si esta combinación resultó ganadora en el sorteo'
+    )
+    prize_amount = models.DecimalField(
+        'Monto del premio',
+        max_digits=15,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text='Monto del premio ganado si esta combinación es ganadora'
+    )
+    prize_type = models.CharField(
+        'Tipo de premio',
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text='Tipo de premio ganado (Mayor, Seco, Aproximación, etc.)'
+    )
+    prize_detail = models.JSONField(
+        'Detalle del premio',
+        null=True,
+        blank=True,
+        default=dict,
+        help_text='Información detallada del premio ganado'
+    )
 
     class Meta:
         verbose_name = 'Combinación de Lotería'
@@ -52,7 +80,8 @@ class LotteryNumberCombination(models.Model):
         unique_together = ['lottery', 'number', 'series', 'draw_date']
         indexes = [
             models.Index(fields=['lottery', 'number', 'series']),
-            models.Index(fields=['draw_date'])
+            models.Index(fields=['draw_date']),
+            models.Index(fields=['is_winner'])
         ]
 
     def available_fractions(self):

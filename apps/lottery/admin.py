@@ -6,23 +6,41 @@ from django.utils.html import format_html
 from django.forms import TextInput
 from django.utils import timezone
 from django.db.models import Sum, Count
-from django.db import transaction
+from django.shortcuts import redirect
+from django import forms
+from django.template.response import TemplateResponse
+from django.urls import path
 import cloudinary
 import cloudinary.uploader
 import csv
 import pytz
+import pandas as pd
+import uuid
+import json
 from datetime import datetime, time
 from io import TextIOWrapper
 from datetime import datetime
-from io import StringIO
-import json
-import pandas as pd
-from django import forms
+from django.db import transaction
 
-from .models import (
-    Lottery, Bet, LotteryResult, Prize, PrizePlan, 
-    PrizeType, LotteryNumberCombination
-)
+from .models import Lottery, Bet, LotteryResult, Prize, PrizePlan, PrizeType, LotteryNumberCombination
+from apps.lottery.services.combination_processor import CombinationProcessor
+
+
+# Formulario para seleccionar lotería
+class LotteryCombinationsForm(forms.Form):
+    file = forms.FileField(label='Archivo CSV de combinaciones')
+    lottery = forms.ChoiceField(label='Lotería', choices=[])
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Obtener todas las loterías activas
+        lotteries = CombinationProcessor.get_all_lotteries()
+        self.fields['lottery'].choices = [(lottery['id'], lottery['name']) for lottery in lotteries]
+
+
+# Formulario para importar CSV
+class CsvImportForm(forms.Form):
+    csv_file = forms.FileField()
 
 
 @admin.register(Lottery)
@@ -64,14 +82,98 @@ class LotteryAdmin(admin.ModelAdmin):
                 'closing_time', 'last_draw_number', 'next_draw_date'
             )
         }),
+        ('Configuración de Números', {
+            'fields': (
+                'number_range_start', 'number_range_end', 'allow_duplicate_numbers',
+                'series'
+            ),
+            'classes': ('collapse',),
+        }),
+        ('Archivos de Sistema', {
+            'fields': (
+                'number_ranges_file', 'unsold_tickets_file', 'sales_file', 'combinations_file'
+            ),
+            'classes': ('collapse',),
+        }),
     )
 
     actions = [
         'generate_sales_file',
         'generate_unsold_file', 
         'generate_type_204_report',
-        'process_combinations_csv'
+        'process_combinations_csv',
+        'upload_combinations_file'
     ]
+    
+    # Añadir URL personalizada para el formulario
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('upload-combinations/', self.admin_site.admin_view(self.upload_combinations_view), name='lottery_upload_combinations'),
+        ]
+        return custom_urls + urls
+    
+    def upload_combinations_view(self, request):
+        """Vista para subir archivo de combinaciones y seleccionar lotería"""
+        context = {
+            'title': 'Subir Combinaciones',
+            'opts': self.model._meta,
+            'app_label': self.model._meta.app_label,
+        }
+        
+        if request.method == 'POST':
+            form = LotteryCombinationsForm(request.POST, request.FILES)
+            if form.is_valid():
+                # Subir archivo a Cloudinary
+                csv_file = request.FILES['file']
+                lottery_id = form.cleaned_data['lottery']
+                
+                try:
+                    upload_result = cloudinary.uploader.upload(
+                        csv_file,
+                        resource_type='raw',
+                        folder=f'lottery/combinations/',
+                        public_id=f'combinations_{lottery_id}_{timezone.now().strftime("%Y%m%d_%H%M%S")}'
+                    )
+                    
+                    # Procesar el archivo
+                    processor = CombinationProcessor(lottery_id=lottery_id)
+                    result = processor.process_cloudinary_file(upload_result['secure_url'])
+                    
+                    if 'error' in result:
+                        self.message_user(request, f"Error: {result['error']}", level=messages.ERROR)
+                    else:
+                        # Actualizar el campo combinations_file de la lotería
+                        lottery = Lottery.objects.get(id=lottery_id)
+                        lottery.combinations_file = upload_result['secure_url']
+                        lottery.save(update_fields=['combinations_file'])
+                        
+                        self.message_user(
+                            request, 
+                            f"Se procesaron {result['combinations_count']} combinaciones para {result['lottery_name']}. "
+                            f"Se añadieron {result['series_count']} series únicas."
+                        )
+                        
+                        # Redirigir a la página de detalle de la lotería
+                        return redirect(f'../change/{lottery_id}')
+                
+                except Exception as e:
+                    self.message_user(request, f"Error: {str(e)}", level=messages.ERROR)
+        else:
+            form = LotteryCombinationsForm()
+        
+        context['form'] = form
+        return TemplateResponse(request, 'admin/lottery/upload_combinations.html', context)
+    
+    def upload_combinations_file(self, request, queryset):
+        """Acción para subir archivo de combinaciones"""
+        if len(queryset) != 1:
+            self.message_user(request, "Seleccione una sola lotería", level=messages.ERROR)
+            return
+            
+        return redirect('admin:lottery_upload_combinations')
+    
+    upload_combinations_file.short_description = "Subir archivo de combinaciones"
 
     def betting_status(self, obj):
         """Estado actual de las apuestas"""
@@ -289,85 +391,81 @@ class LotteryAdmin(admin.ModelAdmin):
                 return
 
             try:
-                # Procesar CSV
-                csv_content = csv_file.read().decode('utf-8')
-                csv_reader = csv.reader(StringIO(csv_content))
+                # Procesar CSV usando pandas
+                df = pd.read_csv(csv_file, dtype={
+                    '5100': str,  # número
+                    '001': str,   # serie
+                    '175': int,   # fracciones (opcional)
+                    '0000': str   # otro campo si existe
+                })
                 
-                # Conjunto para almacenar series únicas
-                unique_series = set(lottery.available_series) if lottery.available_series else set()
-                
-                # Lista para almacenar combinaciones
-                combinations = []
-                
-                # Contador de filas procesadas
                 processed = 0
+                errors = []
                 
                 with transaction.atomic():
-                    # Saltamos la cabecera si existe
-                    next(csv_reader, None)
+                    # Desactivar combinaciones anteriores
+                    LotteryNumberCombination.objects.filter(
+                        lottery=lottery,
+                        draw_date=lottery.next_draw_date
+                    ).update(is_active=False)
                     
-                    for row in csv_reader:
-                        if len(row) >= 4:  # Verificamos que haya al menos 4 columnas
-                            # Columna 3 (índice 2) contiene las series
-                            series = row[2].strip()
-                            # Columna 4 (índice 3) contiene los números
-                            number = row[3].strip()
+                    for index, row in df.iterrows():
+                        try:
+                            number = str(row['5100']).zfill(4)
+                            series = str(row['001']).zfill(3)
                             
-                            # Asegurar que la serie tenga 3 dígitos
-                            series = series.zfill(3)
+                            if not (number.isdigit() and len(number) == 4):
+                                errors.append(f"Fila {index + 2}: Número inválido {number}")
+                                continue
+                                
+                            if not (series.isdigit() and len(series) == 3):
+                                errors.append(f"Fila {index + 2}: Serie inválida {series}")
+                                continue
                             
-                            # Asegurar que el número tenga 4 dígitos
-                            number = number.zfill(4)
-                            
-                            # Añadir la serie al conjunto de series únicas
-                            unique_series.add(series)
-                            
-                            # Añadir la combinación a la lista
-                            combinations.append({
-                                "series": series,
-                                "number": number
-                            })
+                            combination, created = LotteryNumberCombination.objects.update_or_create(
+                                lottery=lottery,
+                                number=number,
+                                series=series,
+                                draw_date=lottery.next_draw_date,
+                                defaults={
+                                    'total_fractions': lottery.fraction_count,
+                                    'used_fractions': 0,
+                                    'is_active': True
+                                }
+                            )
                             processed += 1
-                    
-                    # Crear el JSON de combinaciones
-                    combinations_json = {
-                        "lottery_id": str(lottery.id),
-                        "lottery_name": lottery.name,
-                        "total_combinations": len(combinations),
-                        "combinations": combinations
-                    }
-                    
-                    # Actualizar el modelo Lottery
-                    lottery.valid_combinations_json = combinations_json
-                    lottery.available_series = list(unique_series)
-                    lottery.save()
+                            
+                        except Exception as e:
+                            errors.append(f"Error en fila {index + 2}: {str(e)}")
                 
-                self.message_user(
-                    request,
-                    f'Se han procesado {processed} combinaciones correctamente. '
-                    f'Se actualizaron {len(unique_series)} series disponibles.',
-                    level=messages.SUCCESS
-                )
+                if errors:
+                    self.message_user(
+                        request,
+                        f'Proceso completado con {len(errors)} errores. '
+                        f'Se procesaron {processed} combinaciones correctamente.',
+                        level=messages.WARNING
+                    )
+                else:
+                    self.message_user(
+                        request,
+                        f'Se procesaron {processed} combinaciones correctamente.',
+                        level=messages.SUCCESS
+                    )
                     
             except Exception as e:
                 self.message_user(request, f'Error procesando archivo: {str(e)}', level=messages.ERROR)
             return
 
         # Mostrar formulario de carga usando el intermediario de Django
-        return HttpResponse(
-            f'''
-            <h1>Procesar CSV de Combinaciones para: {lottery.name}</h1>
-            <p>Seleccione un archivo CSV con las combinaciones de series y números.</p>
-            <p>El formato esperado es: 4 columnas, donde la tercera columna contiene las series y la cuarta columna contiene los números.</p>
+        form = CsvImportForm()
+        return self.admin_site.admin_view(lambda r: HttpResponse('''
             <form method="post" enctype="multipart/form-data">
                 <input type="hidden" name="_process_csv" value="1">
                 <input type="file" name="csv_file" accept=".csv" required>
-                <p>El archivo debe contener: 4 columnas con series en la tercera y números en la cuarta</p>
                 <input type="submit" value="Procesar CSV">
-                <input type="hidden" name="csrfmiddlewaretoken" value="{request.CSRF_TOKEN}">
+                <input type="hidden" name="csrfmiddlewaretoken" value="{}">
             </form>
-            '''
-        )
+        '''.format(request.CSRF_TOKEN)))(request)
 
     process_combinations_csv.short_description = "Procesar CSV de combinaciones"
 
@@ -425,14 +523,35 @@ class LotteryAdmin(admin.ModelAdmin):
 
 @admin.register(LotteryNumberCombination)
 class LotteryNumberCombinationAdmin(admin.ModelAdmin):
-    list_display = ('lottery', 'number', 'series', 'available_fractions', 'is_active', 'draw_date')
-    list_filter = ('lottery', 'is_active', 'draw_date')
+    list_display = ('lottery', 'number', 'series', 'available_fractions', 'is_active', 'draw_date', 'winner_status')
+    list_filter = ('lottery', 'is_active', 'draw_date', 'is_winner')
     search_fields = ('number', 'series')
-    readonly_fields = ('used_fractions',)
+    readonly_fields = ('used_fractions', 'prize_detail')
+    
+    fieldsets = (
+        ('Información básica', {
+            'fields': ('lottery', 'number', 'series', 'draw_date', 'is_active')
+        }),
+        ('Fracciones', {
+            'fields': ('total_fractions', 'used_fractions')
+        }),
+        ('Premios', {
+            'fields': ('is_winner', 'prize_type', 'prize_amount', 'prize_detail')
+        }),
+    )
     
     def available_fractions(self, obj):
         return obj.total_fractions - obj.used_fractions
     available_fractions.short_description = 'Fracciones Disponibles'
+    
+    def winner_status(self, obj):
+        if obj.is_winner:
+            return format_html(
+                '<span style="color: green; font-weight: bold;">⭐ GANADORA: {}</span>',
+                obj.prize_type or 'Premio'
+            )
+        return ''
+    winner_status.short_description = 'Estatus Ganador'
 
 
 @admin.register(Bet)
@@ -442,14 +561,12 @@ class BetAdmin(admin.ModelAdmin):
     search_fields = ('user__phone_number', 'number', 'series')
     readonly_fields = ('won_amount', 'winning_details')
 
-
 @admin.register(LotteryResult)
 class LotteryResultAdmin(admin.ModelAdmin):
     list_display = ('lottery', 'fecha', 'numero', 'numero_serie')
     list_filter = ('lottery', 'fecha')
     search_fields = ('numero', 'numero_serie')
     readonly_fields = ('premios_secos',)
-
 
 @admin.register(Prize)
 class PrizeAdmin(admin.ModelAdmin):
@@ -462,7 +579,6 @@ class PrizeAdmin(admin.ModelAdmin):
         if obj.amount and obj.prize_plan.lottery.fraction_count:
             obj.fraction_amount = obj.amount / obj.prize_plan.lottery.fraction_count
         super().save_model(request, obj, form, change)
-
 
 @admin.register(PrizePlan)
 class PrizePlanAdmin(admin.ModelAdmin):
@@ -484,11 +600,10 @@ class PrizePlanAdmin(admin.ModelAdmin):
                 )
                 plan.plan_file = result['secure_url']
                 plan.save()
-                
+
                 self.message_user(request, f"Plan actualizado para {plan.lottery.name}")
             except Exception as e:
                 self.message_user(request, f"Error: {str(e)}", level=messages.ERROR)
-
 
 @admin.register(PrizeType)
 class PrizeTypeAdmin(admin.ModelAdmin):

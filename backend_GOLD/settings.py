@@ -420,3 +420,10 @@ JAZZMIN_UI_TWEAKS = {
         "success": "btn-success"
     }
 }
+
+cloudinary.config(
+    cloud_name = "dklozvc71",
+    api_key = "696542173266314",
+    api_secret = "Ei9xZVawgSClUHNmev6sXEADadc",
+    secure=True
+)
