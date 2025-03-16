@@ -1,3 +1,5 @@
+# Modificar apps/lottery/models/lottery.py para añadir el campo JSON de combinaciones
+
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator, RegexValidator
 from django.utils import timezone
@@ -14,6 +16,7 @@ from apps.lottery.models.bet import Bet
 
 
 class Lottery(BaseModel):
+    # Mantener todos los campos existentes
     DAYS_CHOICES = [
         ('MONDAY', 'Lunes'),
         ('TUESDAY', 'Martes'),
@@ -151,6 +154,15 @@ class Lottery(BaseModel):
         help_text='Series disponibles para esta lotería',
         default=list,
         blank=True
+    )
+
+    combinations_file = CloudinaryField(
+        'Archivo de combinaciones',
+        folder='lottery/combinations/',
+        resource_type='raw',
+        null=True,
+        blank=True,
+        help_text='Archivo CSV con combinaciones de números y series'
     )
 
     def validate_number_in_range(self, number: str) -> bool:

@@ -6,14 +6,41 @@ from django.utils.html import format_html
 from django.forms import TextInput
 from django.utils import timezone
 from django.db.models import Sum, Count
+from django.shortcuts import redirect
+from django import forms
+from django.template.response import TemplateResponse
+from django.urls import path
 import cloudinary
 import cloudinary.uploader
 import csv
 import pytz
+import pandas as pd
+import uuid
+import json
 from datetime import datetime, time
 from io import TextIOWrapper
 from datetime import datetime
+from django.db import transaction
+
 from .models import Lottery, Bet, LotteryResult, Prize, PrizePlan, PrizeType, LotteryNumberCombination
+from apps.lottery.services.combination_processor import CombinationProcessor
+
+
+# Formulario para seleccionar lotería
+class LotteryCombinationsForm(forms.Form):
+    file = forms.FileField(label='Archivo CSV de combinaciones')
+    lottery = forms.ChoiceField(label='Lotería', choices=[])
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Obtener todas las loterías activas
+        lotteries = CombinationProcessor.get_all_lotteries()
+        self.fields['lottery'].choices = [(lottery['id'], lottery['name']) for lottery in lotteries]
+
+
+# Formulario para importar CSV
+class CsvImportForm(forms.Form):
+    csv_file = forms.FileField()
 
 
 @admin.register(Lottery)
@@ -55,14 +82,98 @@ class LotteryAdmin(admin.ModelAdmin):
                 'closing_time', 'last_draw_number', 'next_draw_date'
             )
         }),
+        ('Configuración de Números', {
+            'fields': (
+                'number_range_start', 'number_range_end', 'allow_duplicate_numbers',
+                'series'
+            ),
+            'classes': ('collapse',),
+        }),
+        ('Archivos de Sistema', {
+            'fields': (
+                'number_ranges_file', 'unsold_tickets_file', 'sales_file', 'combinations_file'
+            ),
+            'classes': ('collapse',),
+        }),
     )
 
     actions = [
         'generate_sales_file',
         'generate_unsold_file', 
         'generate_type_204_report',
-        'process_combinations_csv'
+        'process_combinations_csv',
+        'upload_combinations_file'
     ]
+    
+    # Añadir URL personalizada para el formulario
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('upload-combinations/', self.admin_site.admin_view(self.upload_combinations_view), name='lottery_upload_combinations'),
+        ]
+        return custom_urls + urls
+    
+    def upload_combinations_view(self, request):
+        """Vista para subir archivo de combinaciones y seleccionar lotería"""
+        context = {
+            'title': 'Subir Combinaciones',
+            'opts': self.model._meta,
+            'app_label': self.model._meta.app_label,
+        }
+        
+        if request.method == 'POST':
+            form = LotteryCombinationsForm(request.POST, request.FILES)
+            if form.is_valid():
+                # Subir archivo a Cloudinary
+                csv_file = request.FILES['file']
+                lottery_id = form.cleaned_data['lottery']
+                
+                try:
+                    upload_result = cloudinary.uploader.upload(
+                        csv_file,
+                        resource_type='raw',
+                        folder=f'lottery/combinations/',
+                        public_id=f'combinations_{lottery_id}_{timezone.now().strftime("%Y%m%d_%H%M%S")}'
+                    )
+                    
+                    # Procesar el archivo
+                    processor = CombinationProcessor(lottery_id=lottery_id)
+                    result = processor.process_cloudinary_file(upload_result['secure_url'])
+                    
+                    if 'error' in result:
+                        self.message_user(request, f"Error: {result['error']}", level=messages.ERROR)
+                    else:
+                        # Actualizar el campo combinations_file de la lotería
+                        lottery = Lottery.objects.get(id=lottery_id)
+                        lottery.combinations_file = upload_result['secure_url']
+                        lottery.save(update_fields=['combinations_file'])
+                        
+                        self.message_user(
+                            request, 
+                            f"Se procesaron {result['combinations_count']} combinaciones para {result['lottery_name']}. "
+                            f"Se añadieron {result['series_count']} series únicas."
+                        )
+                        
+                        # Redirigir a la página de detalle de la lotería
+                        return redirect(f'../change/{lottery_id}')
+                
+                except Exception as e:
+                    self.message_user(request, f"Error: {str(e)}", level=messages.ERROR)
+        else:
+            form = LotteryCombinationsForm()
+        
+        context['form'] = form
+        return TemplateResponse(request, 'admin/lottery/upload_combinations.html', context)
+    
+    def upload_combinations_file(self, request, queryset):
+        """Acción para subir archivo de combinaciones"""
+        if len(queryset) != 1:
+            self.message_user(request, "Seleccione una sola lotería", level=messages.ERROR)
+            return
+            
+        return redirect('admin:lottery_upload_combinations')
+    
+    upload_combinations_file.short_description = "Subir archivo de combinaciones"
 
     def betting_status(self, obj):
         """Estado actual de las apuestas"""
@@ -412,14 +523,35 @@ class LotteryAdmin(admin.ModelAdmin):
 
 @admin.register(LotteryNumberCombination)
 class LotteryNumberCombinationAdmin(admin.ModelAdmin):
-    list_display = ('lottery', 'number', 'series', 'available_fractions', 'is_active', 'draw_date')
-    list_filter = ('lottery', 'is_active', 'draw_date')
+    list_display = ('lottery', 'number', 'series', 'available_fractions', 'is_active', 'draw_date', 'winner_status')
+    list_filter = ('lottery', 'is_active', 'draw_date', 'is_winner')
     search_fields = ('number', 'series')
-    readonly_fields = ('used_fractions',)
+    readonly_fields = ('used_fractions', 'prize_detail')
+    
+    fieldsets = (
+        ('Información básica', {
+            'fields': ('lottery', 'number', 'series', 'draw_date', 'is_active')
+        }),
+        ('Fracciones', {
+            'fields': ('total_fractions', 'used_fractions')
+        }),
+        ('Premios', {
+            'fields': ('is_winner', 'prize_type', 'prize_amount', 'prize_detail')
+        }),
+    )
     
     def available_fractions(self, obj):
         return obj.total_fractions - obj.used_fractions
     available_fractions.short_description = 'Fracciones Disponibles'
+    
+    def winner_status(self, obj):
+        if obj.is_winner:
+            return format_html(
+                '<span style="color: green; font-weight: bold;">⭐ GANADORA: {}</span>',
+                obj.prize_type or 'Premio'
+            )
+        return ''
+    winner_status.short_description = 'Estatus Ganador'
 
 
 @admin.register(Bet)
@@ -448,7 +580,7 @@ class PrizeAdmin(admin.ModelAdmin):
             obj.fraction_amount = obj.amount / obj.prize_plan.lottery.fraction_count
         super().save_model(request, obj, form, change)
 
-@admin.register(PrizePlan)  # Registrar el modelo correcto
+@admin.register(PrizePlan)
 class PrizePlanAdmin(admin.ModelAdmin):
     list_display = ['lottery', 'name', 'start_date', 'is_active', 'last_updated']
     actions = ['upload_plan_file']
@@ -468,7 +600,7 @@ class PrizePlanAdmin(admin.ModelAdmin):
                 )
                 plan.plan_file = result['secure_url']
                 plan.save()
-                
+
                 self.message_user(request, f"Plan actualizado para {plan.lottery.name}")
             except Exception as e:
                 self.message_user(request, f"Error: {str(e)}", level=messages.ERROR)
