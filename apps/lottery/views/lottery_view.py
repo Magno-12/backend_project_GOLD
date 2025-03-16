@@ -326,6 +326,7 @@ class LotteryResultViewSet(GenericViewSet):
 
             for lottery in lotteries:
                 lottery_info = {
+                    "id": lottery.id,
                     "name": lottery.name,
                     "amount": str(lottery.major_prize_amount),
                     "time": lottery.closing_time.strftime("%H:%M"),
