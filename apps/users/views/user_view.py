@@ -1,5 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.core.mail import send_mail
+from django.conf import settings
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -131,7 +133,32 @@ class UserViewSet(viewsets.GenericViewSet):
             validate_pin(new_pin)
             request.user.set_password(new_pin)
             request.user.save()
-            return Response({'message': 'PIN actualizado correctamente'})
+            
+            # Enviar correo de confirmación
+            subject = 'Cambio de PIN exitoso - GOLD Lottery'
+            message = f'''
+            Hola {request.user.first_name},
+            
+            Tu PIN ha sido actualizado exitosamente.
+            
+            Si no realizaste este cambio, por favor contacta a nuestro equipo de soporte inmediatamente.
+            
+            Atentamente,
+            Equipo de GOLD Lottery
+            '''
+            from_email = settings.DEFAULT_FROM_EMAIL
+            recipient_list = [request.user.email]
+            
+            send_mail(
+                subject,
+                message,
+                from_email,
+                recipient_list,
+                fail_silently=False,
+            )
+            
+            return Response({'message': 'PIN actualizado correctamente. Se ha enviado un correo de confirmación.'})
+            
         except ValidationError as e:
             return Response(
                 {'error': str(e)},
