@@ -14,17 +14,6 @@ class LotteryResultSerializer(serializers.ModelSerializer):
     lottery_name = serializers.CharField(source='lottery.name')
     premios_secos = PremioSecoSerializer(many=True)
 
-    # Campos adicionales para la factura
-    fraction_price = serializers.SerializerMethodField()
-    total_fractions = serializers.SerializerMethodField()
-    draw_number = serializers.SerializerMethodField()
-    transaction_date = serializers.SerializerMethodField()
-    transaction_reference = serializers.SerializerMethodField()
-    buyer_id = serializers.SerializerMethodField()
-    lottery_logo = serializers.SerializerMethodField()
-    distributor = serializers.SerializerMethodField()
-    location = serializers.CharField(default="Medellin, ANT.", read_only=True)
-
     class Meta:
         model = LotteryResult
         fields = [
@@ -39,9 +28,23 @@ class LotteryResultSerializer(serializers.ModelSerializer):
 
 
 class BetSerializer(serializers.ModelSerializer):
-    lottery = serializers.CharField(write_only=True)  # Cambio aquí
+    lottery = serializers.CharField(write_only=True)
     lottery_name = serializers.CharField(source='lottery.name', read_only=True)
     result = serializers.SerializerMethodField()
+    
+    # Estos deben ser campos separados
+    fractions = serializers.IntegerField(read_only=True)  # Ya existe en el modelo
+    fraction_price = serializers.SerializerMethodField()  # Método personalizado
+    
+    # Otros campos personalizados
+    total_fractions = serializers.SerializerMethodField()
+    draw_number = serializers.SerializerMethodField()
+    transaction_date = serializers.SerializerMethodField()
+    transaction_reference = serializers.SerializerMethodField()
+    buyer_id = serializers.SerializerMethodField()
+    lottery_logo = serializers.SerializerMethodField()
+    distributor = serializers.CharField(default="Coinjuegos LOTERÍA:19", read_only=True)
+    location = serializers.CharField(default="Medellin, ANT.", read_only=True)
 
     class Meta:
         model = Bet
@@ -56,9 +59,8 @@ class BetSerializer(serializers.ModelSerializer):
             'status',
             'created_at',
             'result',
-            'fractions'
-            # Campos adicionales para la factura
-            'fraction_price',
+            'fractions',  # Ya existe en el modelo
+            'fraction_price',  # Campo calculado
             'total_fractions',
             'draw_number',
             'transaction_date',

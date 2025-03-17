@@ -7,6 +7,9 @@ from django.db.models import Sum, F
 from datetime import time, timedelta
 from cloudinary.models import CloudinaryField
 from django.contrib.postgres.fields import ArrayField
+import os
+from django.core.files.storage import default_storage
+from cloudinary.uploader import upload
 import pytz
 from decimal import Decimal
 from datetime import datetime, time
@@ -275,19 +278,55 @@ class Lottery(BaseModel):
         return now.time() < self.closing_time
 
     def save(self, *args, **kwargs):
+        file_to_upload = None
+        is_new_file = False
+        
+        # Verificar si hay un nuevo archivo por subir
+        if hasattr(self, 'prize_plan_file') and self.prize_plan_file and hasattr(self.prize_plan_file, 'file'):
+            file_to_upload = self.prize_plan_file
+            is_new_file = True
+            temp_file = self.prize_plan_file
+            self.prize_plan_file = None
+        
+        # Lógica de negocio existente
         if self.is_active:
             if not self.pk or 'last_draw_number' in kwargs:
                 self.last_draw_number = (self.last_draw_number or 0) + 1
-            
-            # Actualizar next_draw_date cada vez que se guarda
             if not self.next_draw_date or timezone.now().date() >= self.next_draw_date:
                 self.next_draw_date = self.get_days_until_next_draw()
-            
-            # Asegurar que max_fractions_per_bet no sea mayor que fraction_count
             if self.max_fractions_per_bet > self.fraction_count:
                 self.max_fractions_per_bet = self.fraction_count
-                
+        
+        # Guardar la instancia primero
         super().save(*args, **kwargs)
+        
+        # Si hay archivo nuevo, subirlo correctamente
+        if is_new_file and file_to_upload:
+            try:
+                # Obtener extensión real del archivo
+                original_name = getattr(file_to_upload, 'name', None)
+                ext = os.path.splitext(original_name)[1] if original_name else '.pdf'
+                
+                timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+                public_id = f"plan_{self.id}_{timestamp}"
+                
+                # CONFIGURACIÓN CRÍTICA PARA ACCESO PÚBLICO
+                result = upload(
+                    temp_file,
+                    public_id=public_id,
+                    folder='lottery/prize_plans',
+                    resource_type='raw',
+                    type='upload',         # Tipo explícito
+                    access_mode='public',  # ¡IMPORTANTE! Acceso público
+                    invalidate=True,       # Invalidar caché para actualizaciones
+                    overwrite=True
+                )
+                
+                secure_url = result['secure_url']
+                self.__class__.objects.filter(pk=self.pk).update(prize_plan_file=secure_url)
+                print(f"Archivo subido correctamente: {secure_url}")
+            except Exception as e:
+                print(f"Error al subir archivo a Cloudinary: {str(e)}")
 
     class Meta:
         verbose_name = 'Lotería'

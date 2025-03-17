@@ -422,6 +422,12 @@ class BetViewSet(GenericViewSet):
     permission_classes = [IsAuthenticated, IsOwner]
 
     def get_queryset(self):
+    # Verificar si es una vista de swagger
+        if getattr(self, 'swagger_fake_view', False):
+            # Retornar un QuerySet vacío
+            return Bet.objects.none()
+
+        # Comportamiento normal
         return Bet.objects.filter(user=self.request.user).order_by('-created_at')
 
     def list(self, request):
