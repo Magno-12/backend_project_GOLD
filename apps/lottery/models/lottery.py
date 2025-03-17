@@ -305,24 +305,26 @@ class Lottery(BaseModel):
             try:
                 # Obtener extensión real del archivo
                 original_name = getattr(file_to_upload, 'name', None)
-                ext = os.path.splitext(original_name)[1] if original_name else '.pdf'
+                ext = os.path.splitext(original_name)[1] if original_name and '.' in original_name else '.pdf'
                 
                 timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
                 public_id = f"plan_{self.id}_{timestamp}"
                 
-                # CONFIGURACIÓN CRÍTICA PARA ACCESO PÚBLICO
+                # IMPORTANTE: Usar resource_type='auto' para que Cloudinary detecte el tipo
                 result = upload(
                     temp_file,
                     public_id=public_id,
                     folder='lottery/prize_plans',
-                    resource_type='raw',
+                    resource_type='auto',  # Detectar automáticamente el tipo
                     type='upload',         # Tipo explícito
-                    access_mode='public',  # ¡IMPORTANTE! Acceso público
-                    invalidate=True,       # Invalidar caché para actualizaciones
-                    overwrite=True
+                    access_mode='public',  # Acceso público
+                    overwrite=True         # Sobrescribir si existe
                 )
                 
+                # Usar la URL generada por Cloudinary directamente
                 secure_url = result['secure_url']
+                
+                # Actualizar la base de datos con la URL correcta
                 self.__class__.objects.filter(pk=self.pk).update(prize_plan_file=secure_url)
                 print(f"Archivo subido correctamente: {secure_url}")
             except Exception as e:
