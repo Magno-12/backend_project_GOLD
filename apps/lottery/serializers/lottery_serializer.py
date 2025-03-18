@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
+from decimal import Decimal
 
 from apps.lottery.models import LotteryResult, Lottery, Bet
 
@@ -184,7 +185,7 @@ class BetSerializer(serializers.ModelSerializer):
         # Calcular el monto por fracción si es necesario
         fraction_amount = None
         if obj.fractions and obj.lottery.fraction_count:
-            fraction_amount = str(major_prize.amount * (obj.fractions / obj.lottery.fraction_count))
+            fraction_amount = str(major_prize.amount * (Decimal(obj.fractions) / Decimal(obj.lottery.fraction_count)))
         
         return {
             "prize_plan": {
