@@ -1,5 +1,3 @@
-# Modificar apps/lottery/models/lottery.py para añadir el campo JSON de combinaciones
-
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator, RegexValidator
 from django.utils import timezone
@@ -7,6 +5,9 @@ from django.db.models import Sum, F
 from datetime import time, timedelta
 from cloudinary.models import CloudinaryField
 from django.contrib.postgres.fields import ArrayField
+import os
+from django.core.files.storage import default_storage
+from cloudinary.uploader import upload
 import pytz
 from decimal import Decimal
 from datetime import datetime, time
@@ -165,6 +166,15 @@ class Lottery(BaseModel):
         help_text='Archivo CSV con combinaciones de números y series'
     )
 
+    prize_plan_file = CloudinaryField(
+        'Archivo de plan de premios',
+        folder='lottery/prize_plans/',
+        resource_type='auto',
+        null=True,
+        blank=True,
+        help_text='Archivo PDF o imagen del plan de premios actual'
+    )
+
     def validate_number_in_range(self, number: str) -> bool:
         """Valifica si el número está dentro del rango permitido"""
         try:
@@ -229,7 +239,7 @@ class Lottery(BaseModel):
     def update_next_draw_date(self):
         """Actualizar next_draw_date a la próxima ocurrencia de draw_day"""
         current_date = timezone.now().date()
-        
+
         # Si next_draw_date está en el pasado o es hoy, calcular nueva fecha
         if not self.next_draw_date or self.next_draw_date <= current_date:
             self.next_draw_date = self.get_days_until_next_draw()
@@ -266,19 +276,57 @@ class Lottery(BaseModel):
         return now.time() < self.closing_time
 
     def save(self, *args, **kwargs):
+        file_to_upload = None
+        is_new_file = False
+
+        # Verificar si hay un nuevo archivo por subir
+        if hasattr(self, 'prize_plan_file') and self.prize_plan_file and hasattr(self.prize_plan_file, 'file'):
+            file_to_upload = self.prize_plan_file
+            is_new_file = True
+            temp_file = self.prize_plan_file
+            self.prize_plan_file = None
+
+        # Lógica de negocio existente
         if self.is_active:
             if not self.pk or 'last_draw_number' in kwargs:
                 self.last_draw_number = (self.last_draw_number or 0) + 1
-            
-            # Actualizar next_draw_date cada vez que se guarda
             if not self.next_draw_date or timezone.now().date() >= self.next_draw_date:
                 self.next_draw_date = self.get_days_until_next_draw()
-            
-            # Asegurar que max_fractions_per_bet no sea mayor que fraction_count
             if self.max_fractions_per_bet > self.fraction_count:
                 self.max_fractions_per_bet = self.fraction_count
-                
+
+        # Guardar la instancia primero
         super().save(*args, **kwargs)
+
+        # Si hay archivo nuevo, subirlo correctamente
+        if is_new_file and file_to_upload:
+            try:
+                # Obtener extensión real del archivo
+                original_name = getattr(file_to_upload, 'name', None)
+                ext = os.path.splitext(original_name)[1] if original_name and '.' in original_name else '.pdf'
+                
+                timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+                public_id = f"plan_{self.id}_{timestamp}"
+                
+                # IMPORTANTE: Usar resource_type='auto' para que Cloudinary detecte el tipo
+                result = upload(
+                    temp_file,
+                    public_id=public_id,
+                    folder='lottery/prize_plans',
+                    resource_type='auto',  # Detectar automáticamente el tipo
+                    type='upload',         # Tipo explícito
+                    access_mode='public',  # Acceso público
+                    overwrite=True         # Sobrescribir si existe
+                )
+                
+                # Usar la URL generada por Cloudinary directamente
+                secure_url = result['secure_url']
+                
+                # Actualizar la base de datos con la URL correcta
+                self.__class__.objects.filter(pk=self.pk).update(prize_plan_file=secure_url)
+                print(f"Archivo subido correctamente: {secure_url}")
+            except Exception as e:
+                print(f"Error al subir archivo a Cloudinary: {str(e)}")
 
     class Meta:
         verbose_name = 'Lotería'

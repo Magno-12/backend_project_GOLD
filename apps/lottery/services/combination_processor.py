@@ -205,10 +205,10 @@ class CombinationProcessor:
             LotteryNumberCombination.objects.bulk_create(combinations_to_create)
         
         # Actualizar available_series en la lotería (sin duplicados)
-        current_series = set(self.lottery.available_series or [])
-        updated_series = list(current_series.union(unique_series))
-        self.lottery.available_series = updated_series
-        self.lottery.save(update_fields=['available_series'])
+        # current_series = set(self.lottery.available_series or [])
+        # updated_series = list(current_series.union(unique_series))
+        # self.lottery.available_series = updated_series
+        # self.lottery.save(update_fields=['available_series'])
         
         # Crear estructura JSON para el resultado
         result_json = {

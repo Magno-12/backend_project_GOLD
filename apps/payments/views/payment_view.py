@@ -38,6 +38,12 @@ class PaymentViewSet(GenericViewSet):
         return TransactionSerializer
 
     def get_queryset(self):
+        # Verificar si es una vista de swagger
+        if getattr(self, 'swagger_fake_view', False):
+            # Retornar un QuerySet vacío
+            return Transaction.objects.none()
+        
+        # Comportamiento normal
         return Transaction.objects.filter(user=self.request.user)
 
     @action(detail=False, methods=['post'])
