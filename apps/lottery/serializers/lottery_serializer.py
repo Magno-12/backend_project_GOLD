@@ -31,6 +31,7 @@ class BetSerializer(serializers.ModelSerializer):
     lottery = serializers.CharField(write_only=True)
     lottery_name = serializers.CharField(source='lottery.name', read_only=True)
     result = serializers.SerializerMethodField()
+    sorteo = serializers.SerializerMethodField(read_only=True)
     
     # Estos deben ser campos separados
     fractions = serializers.IntegerField(read_only=True)  # Ya existe en el modelo
@@ -68,7 +69,8 @@ class BetSerializer(serializers.ModelSerializer):
             'buyer_id',
             'lottery_logo',
             'distributor',
-            'location'
+            'location',
+            'sorteo'
         ]
         read_only_fields = ['status', 'lottery_name']
 
@@ -150,3 +152,9 @@ class BetSerializer(serializers.ModelSerializer):
     def get_distributor(self, obj):
         """Obtiene el nombre del distribuidor"""
         return "Coinjuegos LOTERÍA:19"
+    
+    def get_sorteo(self, obj):
+        """Obtiene el número de sorteo"""
+        if hasattr(obj, 'lottery') and obj.lottery:
+            return obj.lottery.last_draw_number + 1
+        return None

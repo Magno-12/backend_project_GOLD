@@ -1,5 +1,3 @@
-# Modificar apps/lottery/models/lottery.py para añadir el campo JSON de combinaciones
-
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator, RegexValidator
 from django.utils import timezone
@@ -241,7 +239,7 @@ class Lottery(BaseModel):
     def update_next_draw_date(self):
         """Actualizar next_draw_date a la próxima ocurrencia de draw_day"""
         current_date = timezone.now().date()
-        
+
         # Si next_draw_date está en el pasado o es hoy, calcular nueva fecha
         if not self.next_draw_date or self.next_draw_date <= current_date:
             self.next_draw_date = self.get_days_until_next_draw()
@@ -280,14 +278,14 @@ class Lottery(BaseModel):
     def save(self, *args, **kwargs):
         file_to_upload = None
         is_new_file = False
-        
+
         # Verificar si hay un nuevo archivo por subir
         if hasattr(self, 'prize_plan_file') and self.prize_plan_file and hasattr(self.prize_plan_file, 'file'):
             file_to_upload = self.prize_plan_file
             is_new_file = True
             temp_file = self.prize_plan_file
             self.prize_plan_file = None
-        
+
         # Lógica de negocio existente
         if self.is_active:
             if not self.pk or 'last_draw_number' in kwargs:
@@ -296,10 +294,10 @@ class Lottery(BaseModel):
                 self.next_draw_date = self.get_days_until_next_draw()
             if self.max_fractions_per_bet > self.fraction_count:
                 self.max_fractions_per_bet = self.fraction_count
-        
+
         # Guardar la instancia primero
         super().save(*args, **kwargs)
-        
+
         # Si hay archivo nuevo, subirlo correctamente
         if is_new_file and file_to_upload:
             try:

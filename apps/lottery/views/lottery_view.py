@@ -995,8 +995,18 @@ class BetViewSet(GenericViewSet):
         if end_date:
             queryset = queryset.filter(draw_date__lte=end_date)
 
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+        # Obtener las apuestas con información de la lotería
+        queryset = queryset.select_related('lottery')
+        
+        # Preparar datos incluyendo el número de sorteo
+        bet_data = []
+        for bet in queryset:
+            bet_info = self.get_serializer(bet).data
+            # Añadir el número de sorteo
+            bet_info['sorteo'] = bet.lottery.last_draw_number + 1
+            bet_data.append(bet_info)
+            
+        return Response(bet_data)
 
     @action(detail=False, methods=['get'])
     def winnings_summary(self, request):
@@ -1096,6 +1106,7 @@ class BetViewSet(GenericViewSet):
                     'number': bet.number,
                     'amount_won': str(bet.won_amount),
                     'draw_date': bet.draw_date,
+                    'sorteo': bet.lottery.last_draw_number + 1,
                     'prize_details': bet.winning_details.get('prizes', [])
                 } for bet in winning_bets]
             }
@@ -1133,6 +1144,7 @@ class BetViewSet(GenericViewSet):
                     'number': bet.number,
                     'amount_won': str(bet.won_amount),
                     'draw_date': bet.draw_date,
+                    'sorteo': bet.lottery.last_draw_number + 1,
                     'prize_details': bet.winning_details.get('prizes', [])
                 } for bet in winning_bets],
                 'has_more': winning_bets.count() == page_size
