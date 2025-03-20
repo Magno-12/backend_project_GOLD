@@ -53,9 +53,9 @@ class UserBalanceAdmin(admin.ModelAdmin):
 class PrizeWithdrawalAdmin(admin.ModelAdmin):
     list_display = [
         'withdrawal_code', 'user', 'amount', 'status_colored',
-        'bank_info', 'created_at', 'expiration_status', 'destination_account'
+        'bank_info', 'created_at', 'expiration_status', 'destination_account', 'uses_keys'
     ]
-    list_filter = ['status', 'bank', 'account_type', 'created_at']
+    list_filter = ['status', 'bank', 'account_type', 'created_at', 'use_keys']
     search_fields = [
         'withdrawal_code', 'user__email', 'user__first_name',
         'user__last_name', 'account_number'
@@ -71,7 +71,7 @@ class PrizeWithdrawalAdmin(admin.ModelAdmin):
         }),
         ('Información bancaria', {
             'fields': (
-                'bank', 'account_type', 'account_number'
+                'bank', 'account_type', 'account_number', 'use_keys'
             )
         }),
         ('Notas y procesamiento', {
@@ -80,6 +80,17 @@ class PrizeWithdrawalAdmin(admin.ModelAdmin):
             )
         }),
     )
+
+    def uses_keys(self, obj):
+        """Mostrar si usa sistema de llaves"""
+        if obj.use_keys:
+            return format_html(
+                '<span style="color: green;">✓</span>'
+            )
+        return format_html(
+                '<span style="color: red;">✗</span>'
+            )
+    uses_keys.short_description = 'Usa Llaves'
 
     def status_colored(self, obj):
         colors = {
