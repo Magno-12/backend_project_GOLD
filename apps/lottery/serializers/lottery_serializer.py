@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
+from decimal import Decimal
 
 from apps.lottery.models import LotteryResult, Lottery, Bet
 
@@ -32,6 +33,7 @@ class BetSerializer(serializers.ModelSerializer):
     lottery_name = serializers.CharField(source='lottery.name', read_only=True)
     result = serializers.SerializerMethodField()
     sorteo = serializers.SerializerMethodField(read_only=True)
+    prize_plan_info = serializers.SerializerMethodField()
     
     # Estos deben ser campos separados
     fractions = serializers.IntegerField(read_only=True)  # Ya existe en el modelo
@@ -70,7 +72,8 @@ class BetSerializer(serializers.ModelSerializer):
             'lottery_logo',
             'distributor',
             'location',
-            'sorteo'
+            'sorteo',
+            'prize_plan_info'
         ]
         read_only_fields = ['status', 'lottery_name']
 
@@ -149,12 +152,47 @@ class BetSerializer(serializers.ModelSerializer):
         """Obtiene el logo de la lotería"""
         return obj.lottery.logo_url
     
-    def get_distributor(self, obj):
-        """Obtiene el nombre del distribuidor"""
-        return "Coinjuegos LOTERÍA:19"
-    
     def get_sorteo(self, obj):
         """Obtiene el número de sorteo"""
         if hasattr(obj, 'lottery') and obj.lottery:
             return obj.lottery.last_draw_number + 1
         return None
+        
+    def get_prize_plan_info(self, obj):
+        """Obtiene información del premio mayor del plan de premios activo"""
+        from apps.lottery.models.prize_plan import PrizePlan
+        
+        if not hasattr(obj, 'lottery') or not obj.lottery:
+            return None
+            
+        # Obtener el plan de premios activo para la lotería
+        active_plan = PrizePlan.objects.filter(
+            lottery=obj.lottery,
+            is_active=True
+        ).first()
+        
+        if not active_plan:
+            return None
+            
+        # Obtener el premio mayor
+        major_prize = active_plan.prizes.filter(
+            prize_type__code='MAJOR'
+        ).first()
+        
+        if not major_prize:
+            return None
+            
+        # Calcular el monto por fracción si es necesario
+        fraction_amount = None
+        if obj.fractions and obj.lottery.fraction_count:
+            fraction_amount = str(major_prize.amount * (Decimal(obj.fractions) / Decimal(obj.lottery.fraction_count)))
+        
+        return {
+            "prize_plan": {
+                "major": {
+                    "amount": str(major_prize.amount),
+                    "description": "Premio Mayor",
+                    "fraction_amount": fraction_amount
+                }
+            }
+        }
