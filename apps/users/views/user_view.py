@@ -258,7 +258,7 @@ class UserViewSet(viewsets.GenericViewSet):
             
             Tu código de verificación es: {reset_code.code}
             
-            Este código expirará en 30 minutos.
+            Este código expirará en 5 minutos.
             
             Si no solicitaste este cambio, ignora este correo.
             
