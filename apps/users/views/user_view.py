@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.core.mail import send_mail
 from django.conf import settings
+from django.utils import timezone
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -11,9 +12,17 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from apps.users.models.user import User
+from apps.users.models.password_reset import PasswordResetCode
 from apps.users.serializers.user_serializer import UserSerializer
 from apps.users.serializers.profile_serializer import UserProfileSerializer
+from apps.users.serializers.password_serializers import (
+    RequestPasswordResetSerializer,
+    VerifyPasswordResetCodeSerializer,
+    ResetPasswordSerializer
+)
 from apps.users.utils.validators import validate_pin
+import random
+import string
 
 
 class UserViewSet(viewsets.GenericViewSet):
@@ -21,7 +30,7 @@ class UserViewSet(viewsets.GenericViewSet):
     serializer_class = UserSerializer
 
     def get_permissions(self):
-        if self.action == 'create':
+        if self.action in ['create', 'request_reset_code', 'verify_reset_code', 'reset_password']:
             permission_classes = [AllowAny]
         else:
             permission_classes = [IsAuthenticated]
@@ -32,6 +41,7 @@ class UserViewSet(viewsets.GenericViewSet):
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
+            # Usamos set_password para encriptar el PIN antes de guardarlo
             user.set_password(request.data['pin'])
             user.save()
             return Response(
@@ -113,7 +123,58 @@ class UserViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=['post'])
     def change_password(self, request, pk=None):
-        """Cambiar PIN del usuario. Solo permite cambiar el PIN propio."""
+        """
+        Cambiar PIN del usuario. 
+        Hay dos formas:
+        1. Si el usuario está autenticado, puede cambiar su PIN con el PIN actual.
+        2. Si el usuario está utilizando un código de recuperación (enviado por email).
+        """
+        # Verificar si es un cambio de PIN con código de recuperación
+        if 'code' in request.data and 'email' in request.data:
+            serializer = ResetPasswordSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+            user = serializer.validated_data['user']
+            reset_code = serializer.validated_data['reset_code']
+            new_pin = serializer.validated_data['new_pin']
+            
+            with transaction.atomic():
+                # Cambiar contraseña - Asegurando el uso de set_password que encripta automáticamente
+                user.set_password(new_pin)
+                user.save()
+                
+                # Marcar código como usado
+                reset_code.is_used = True
+                reset_code.save()
+                
+                # Enviar correo de confirmación
+                subject = 'Contraseña actualizada - GOLD Lottery'
+                message = f"""
+                Hola {user.first_name},
+                
+                Tu contraseña ha sido actualizada exitosamente.
+                
+                Si no realizaste este cambio, por favor contacta a nuestro equipo de soporte inmediatamente.
+                
+                Atentamente,
+                Equipo de GOLD Lottery
+                """
+                
+                from_email = settings.DEFAULT_FROM_EMAIL
+                recipient_list = [user.email]
+                
+                send_mail(
+                    subject,
+                    message,
+                    from_email,
+                    recipient_list,
+                    fail_silently=False,
+                )
+            
+            return Response({'message': 'Contraseña actualizada exitosamente'})
+        
+        # Cambio de PIN normal (con PIN actual)
         if str(request.user.id) != pk:
             return Response(
                 {'error': 'No tienes permiso para cambiar el PIN de otro usuario'},
@@ -123,6 +184,7 @@ class UserViewSet(viewsets.GenericViewSet):
         old_pin = request.data.get('old_pin')
         new_pin = request.data.get('new_pin')
 
+        # check_password verifica correctamente contra el hash almacenado
         if not request.user.check_password(old_pin):
             return Response(
                 {'error': 'PIN actual incorrecto'},
@@ -131,6 +193,7 @@ class UserViewSet(viewsets.GenericViewSet):
 
         try:
             validate_pin(new_pin)
+            # Usamos set_password para encriptar el PIN antes de guardarlo
             request.user.set_password(new_pin)
             request.user.save()
             
@@ -164,6 +227,84 @@ class UserViewSet(viewsets.GenericViewSet):
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+    @action(detail=False, methods=['post'])
+    def request_reset_code(self, request):
+        """
+        Solicitar un código de recuperación de contraseña.
+        Se envía un correo electrónico con el código.
+        """
+        serializer = RequestPasswordResetSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        email = serializer.validated_data['email']
+        
+        try:
+            user = User.objects.get(email=email)
+            
+            # Invalidar códigos anteriores
+            PasswordResetCode.objects.filter(user=user, is_used=False).update(is_used=True)
+            
+            # Crear nuevo código
+            reset_code = PasswordResetCode.objects.create(user=user)
+            
+            # Enviar correo
+            subject = 'Código de recuperación de contraseña - GOLD Lottery'
+            message = f"""
+            Hola {user.first_name},
+            
+            Has solicitado un código para cambiar tu contraseña.
+            
+            Tu código de verificación es: {reset_code.code}
+            
+            Este código expirará en 30 minutos.
+            
+            Si no solicitaste este cambio, ignora este correo.
+            
+            Atentamente,
+            Equipo de GOLD Lottery
+            """
+            
+            from_email = settings.DEFAULT_FROM_EMAIL
+            recipient_list = [user.email]
+            
+            send_mail(
+                subject,
+                message,
+                from_email,
+                recipient_list,
+                fail_silently=False,
+            )
+            
+            return Response({
+                'message': 'Se ha enviado un código de verificación a tu correo electrónico.',
+                'expires_at': reset_code.expires_at
+            })
+            
+        except User.DoesNotExist:
+            # Por seguridad, no informamos si el correo existe o no
+            return Response({
+                'message': 'Si el correo electrónico está registrado, recibirás un código de verificación.'
+            })
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['post'])
+    def verify_reset_code(self, request):
+        """Verificar el código de recuperación de contraseña"""
+        serializer = VerifyPasswordResetCodeSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        reset_code = serializer.validated_data['reset_code']
+        
+        return Response({
+            'message': 'Código válido',
+            'expires_at': reset_code.expires_at
+        })
 
     @action(detail=True, methods=['patch'])
     def update_profile(self, request, pk=None):
