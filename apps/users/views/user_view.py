@@ -305,6 +305,55 @@ class UserViewSet(viewsets.GenericViewSet):
             'message': 'Código válido',
             'expires_at': reset_code.expires_at
         })
+    
+    @action(detail=False, methods=['post'])
+    def reset_password(self, request):
+        """
+        Restablecer la contraseña usando un código de verificación enviado por email.
+        Este método es para usuarios que han olvidado su contraseña y no necesita la contraseña antigua.
+        """
+        serializer = ResetPasswordSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        user = serializer.validated_data['user']
+        reset_code = serializer.validated_data['reset_code']
+        new_pin = serializer.validated_data['new_pin']
+        
+        with transaction.atomic():
+            # Cambiar contraseña sin requerir la antigua
+            user.set_password(new_pin)
+            user.save()
+            
+            # Marcar código como usado
+            reset_code.is_used = True
+            reset_code.save()
+            
+            # Enviar correo de confirmación
+            subject = 'Contraseña actualizada - GOLD Lottery'
+            message = f"""
+            Hola {user.first_name},
+            
+            Tu contraseña ha sido actualizada exitosamente.
+            
+            Si no realizaste este cambio, por favor contacta a nuestro equipo de soporte inmediatamente.
+            
+            Atentamente,
+            Equipo de GOLD Lottery
+            """
+            
+            from_email = settings.DEFAULT_FROM_EMAIL
+            recipient_list = [user.email]
+            
+            send_mail(
+                subject,
+                message,
+                from_email,
+                recipient_list,
+                fail_silently=False,
+            )
+        
+        return Response({'message': 'Contraseña actualizada exitosamente'})
 
     @action(detail=True, methods=['patch'])
     def update_profile(self, request, pk=None):
