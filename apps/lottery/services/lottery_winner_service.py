@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class LotteryWinnerService:
-    """Servicio completo para procesar resultados y determinar ganadores de lotería"""
+    """Servicio mejorado para procesar resultados y determinar ganadores de lotería"""
 
     def __init__(self, lottery_result: 'LotteryResult'):
         self.result = lottery_result
@@ -20,79 +20,202 @@ class LotteryWinnerService:
         ).first()
         self.winning_number = lottery_result.numero
         self.winning_series = lottery_result.numero_serie
-        self.premios_secos = lottery_result.premios_secos
+        self.premios_secos = lottery_result.premios_secos or []
 
     @transaction.atomic
     def process_results(self):
         """Procesa los resultados y actualiza todas las apuestas pendientes"""
-        print(f"Procesando resultados para {self.lottery.name} - {self.result.fecha}")
+        # Verificar que tenemos un plan de premios
+        if not self.prize_plan:
+            logger.error(f"No se encontró plan de premios activo para {self.lottery.name} - {self.result.fecha}")
+            return
+            
+        logger.info(f"Procesando resultados para {self.lottery.name} - {self.result.fecha}")
+        logger.info(f"Número ganador: {self.winning_number}, Serie: {self.winning_series}")
         
+        # Procesar combinaciones ganadoras primero
+        self.mark_winning_combinations()
+        
+        # Luego procesar apuestas pendientes
         pending_bets = self.lottery.bets.filter(
             draw_date=self.result.fecha,
             status='PENDING'
         ).select_related('user')
-
+        
+        processed_count = 0
+        won_count = 0
         for bet in pending_bets:
-            self.process_bet(bet)
+            if self.process_bet(bet):
+                won_count += 1
+            processed_count += 1
+            
+            # Loguear progreso cada 100 apuestas
+            if processed_count % 100 == 0:
+                logger.info(f"Procesadas {processed_count} apuestas, {won_count} ganadoras")
+        
+        logger.info(f"Procesamiento completado: {processed_count} apuestas procesadas, {won_count} ganadoras")
 
-    def process_bet(self, bet: 'Bet'):
-        logger.info(f"Procesando apuesta {bet.id} para lotería {bet.lottery.name}")
-        winning_details = self.check_all_prizes(bet)
+    def mark_winning_combinations(self):
+        """Marca las combinaciones ganadoras en LotteryNumberCombination"""
+        try:
+            from apps.lottery.models import LotteryNumberCombination
+            
+            # Marcar el premio mayor
+            major_combinations = LotteryNumberCombination.objects.filter(
+                lottery=self.lottery,
+                number=self.winning_number,
+                series=self.winning_series,
+                draw_date=self.result.fecha,
+                is_active=True
+            )
+            
+            if major_combinations.exists():
+                # Buscar el premio mayor en el plan
+                major_prize = next((prize for prize in self.prize_plan.prizes.all() 
+                                   if prize.prize_type.code == 'MAJOR'), None)
+                                   
+                if major_prize:
+                    major_combinations.update(
+                        is_winner=True,
+                        prize_type='MAJOR',
+                        prize_amount=major_prize.amount,
+                        prize_detail={
+                            'type': 'MAJOR',
+                            'name': 'Premio Mayor',
+                            'amount': str(major_prize.amount)
+                        }
+                    )
+                    logger.info(f"Marcada combinación ganadora del premio mayor: {self.winning_number}-{self.winning_series}")
+            
+            # Marcar premios secos
+            if isinstance(self.premios_secos, list):
+                for premio_seco in self.premios_secos:
+                    if isinstance(premio_seco, dict) and 'numero' in premio_seco and 'serie' in premio_seco:
+                        numero = premio_seco.get('numero')
+                        serie = premio_seco.get('serie')
+                        
+                        seco_combinations = LotteryNumberCombination.objects.filter(
+                            lottery=self.lottery,
+                            number=numero,
+                            series=serie,
+                            draw_date=self.result.fecha,
+                            is_active=True
+                        )
+                        
+                        if seco_combinations.exists():
+                            # Buscar premios secos en el plan
+                            seco_prize = next((prize for prize in self.prize_plan.prizes.all() 
+                                              if prize.prize_type.code == 'SECO'), None)
+                                              
+                            if seco_prize:
+                                seco_combinations.update(
+                                    is_winner=True,
+                                    prize_type='SECO',
+                                    prize_amount=seco_prize.amount,
+                                    prize_detail={
+                                        'type': 'SECO',
+                                        'name': seco_prize.name or 'Premio Seco',
+                                        'amount': str(seco_prize.amount)
+                                    }
+                                )
+                                logger.info(f"Marcada combinación ganadora de premio seco: {numero}-{serie}")
+                        
+        except Exception as e:
+            logger.error(f"Error marcando combinaciones ganadoras: {str(e)}")
+
+    def process_bet(self, bet: 'Bet') -> bool:
+        """
+        Procesa una apuesta individual y determina si ha ganado
+        Retorna True si la apuesta ganó, False en caso contrario
+        """
+        logger.info(f"Procesando apuesta {bet.id} para lotería {bet.lottery.name}: {bet.number}-{bet.series}")
         
-        if winning_details['total_amount'] > 0:
-            logger.info(f"Apuesta {bet.id} ganadora. Monto: {winning_details['total_amount']}")
-            bet.status = 'WON'
-            bet.won_amount = winning_details['total_amount']
-            bet.winning_details = winning_details
-        else:
-            logger.info(f"Apuesta {bet.id} no ganadora")
-            bet.status = 'LOST'
-            bet.won_amount = Decimal('0')
-        
-        bet.save()
-        logger.info(f"Apuesta {bet.id} actualizada con estado {bet.status}")
+        try:
+            winning_details = self.check_all_prizes(bet)
+            
+            if winning_details['total_amount'] > 0:
+                logger.info(f"Apuesta {bet.id} ganadora. Monto: {winning_details['total_amount']}")
+                bet.status = 'WON'
+                bet.won_amount = winning_details['total_amount']
+                bet.winning_details = winning_details
+                bet.save()
+                
+                # Añadir registro explícito de cada premio ganado
+                for prize in winning_details['prizes']:
+                    logger.info(f"Premio ganado: {prize['type']} - {prize['name']} - {prize['amount']}")
+                
+                return True
+            else:
+                logger.info(f"Apuesta {bet.id} no ganadora")
+                bet.status = 'LOST'
+                bet.won_amount = Decimal('0')
+                bet.save()
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error procesando apuesta {bet.id}: {str(e)}")
+            # Evitar que la apuesta quede en estado indefinido
+            bet.status = 'PLAYED'
+            bet.save()
+            return False
 
     def check_all_prizes(self, bet: 'Bet') -> Dict:
-        """Verifica todos los tipos de premios posibles para una apuesta"""
+        """
+        Verifica todos los tipos de premios posibles para una apuesta.
+        Mejorado para evitar duplicación de premios y con mejor estructura de datos.
+        """
         winning_details = {
             'prizes': [],
             'total_amount': Decimal('0'),
             'number': bet.number,
             'series': bet.series,
-            'matches': []
+            'matches': [],
+            'winning_number': self.winning_number,
+            'winning_series': self.winning_series
         }
 
-        # 1. Verificar Premio Mayor
+        # Verificación jerárquica de premios, de mayor a menor valor
+        # 1. Verificar Premio Mayor (más importante)
         major_prize = self.check_major_prize(bet)
         if major_prize:
+            # Si gana el premio mayor, no verifica otros premios menores
             winning_details['prizes'].append(major_prize)
             winning_details['total_amount'] += Decimal(major_prize['amount'])
             winning_details['matches'].append('MAJOR')
+            # Retornamos inmediatamente porque el premio mayor excluye otros premios
+            return winning_details
 
-        # 2. Verificar Premios Secos
+        # 2. Verificar Premios Secos (segundo en jerarquía)
         seco_prizes = self.check_seco_prizes(bet)
-        for prize in seco_prizes:
-            winning_details['prizes'].append(prize)
-            winning_details['total_amount'] += Decimal(prize['amount'])
-            winning_details['matches'].append('SECO')
+        if seco_prizes:
+            for prize in seco_prizes:
+                winning_details['prizes'].append(prize)
+                winning_details['total_amount'] += Decimal(prize['amount'])
+                winning_details['matches'].append('SECO')
+            # Si gana premio seco, no verifica aproximaciones
+            return winning_details
 
-        # 3. Verificar Aproximaciones Misma Serie
+        # 3. Verificar Aproximaciones - solo si no ganó mayor ni seco
+        has_won_approx = False
+        
+        # 3.1 Verificar Aproximaciones Misma Serie
         if bet.series == self.winning_series:
             same_series_prizes = self.check_same_series_approximations(bet)
             for prize in same_series_prizes:
                 winning_details['prizes'].append(prize)
                 winning_details['total_amount'] += Decimal(prize['amount'])
                 winning_details['matches'].append(prize['match_type'])
+                has_won_approx = True
 
-        # 4. Verificar Aproximaciones Diferente Serie
-        if bet.series != self.winning_series:
+        # 3.2 Verificar Aproximaciones Diferente Serie (solo si no ganó en misma serie)
+        if bet.series != self.winning_series and not has_won_approx:
             diff_series_prizes = self.check_different_series_approximations(bet)
             for prize in diff_series_prizes:
                 winning_details['prizes'].append(prize)
                 winning_details['total_amount'] += Decimal(prize['amount'])
                 winning_details['matches'].append(prize['match_type'])
 
-        # 5. Verificar Premios Especiales
+        # 4. Verificar Premios Especiales (compatibles con aproximaciones)
         special_prizes = self.check_special_prizes(bet)
         for prize in special_prizes:
             winning_details['prizes'].append(prize)
@@ -124,31 +247,37 @@ class LotteryWinnerService:
         return None
 
     def check_seco_prizes(self, bet: 'Bet') -> List[Dict]:
+        """Verifica si la apuesta coincide con premios secos"""
         seco_prizes = []
         
-        # Validar que premios_secos sea una lista
+        # Verificar que premios_secos tenga el formato correcto
         if not isinstance(self.premios_secos, list):
+            logger.warning(f"El formato de premios_secos no es una lista: {type(self.premios_secos)}")
             return []
 
-        # Iterar sobre premios secos del plan
-        plan_secos = self.prize_plan.prizes.filter(
-            prize_type__code='SECO'
-        ).select_related('prize_type')
-
+        # Iterar sobre premios secos del resultado
         for premio_seco in self.premios_secos:
             # Validar estructura del premio seco
             if not isinstance(premio_seco, dict):
+                logger.warning(f"Premio seco con formato inválido: {premio_seco}")
                 continue
                 
             numero = premio_seco.get('numero')
             serie = premio_seco.get('serie')
             
             if not (numero and serie):
+                logger.warning(f"Premio seco sin número o serie: {premio_seco}")
                 continue
 
             if bet.number == numero and bet.series == serie:
                 # Encontrar el premio correspondiente en el plan
-                for prize in plan_secos:
+                secos = self.prize_plan.prizes.filter(
+                    prize_type__code='SECO'
+                ).order_by('-amount')
+                
+                if secos.exists():
+                    # Asignar el premio seco de mayor valor
+                    prize = secos.first()
                     seco_prizes.append({
                         'type': 'SECO',
                         'name': prize.name or 'Premio Seco',
@@ -159,7 +288,7 @@ class LotteryWinnerService:
                             'series': bet.series
                         }
                     })
-                    break
+                    break  # Una apuesta solo puede ganar un premio seco
 
         return seco_prizes
 
@@ -171,20 +300,31 @@ class LotteryWinnerService:
         same_series_prizes = self.prize_plan.prizes.filter(
             prize_type__code='APPROX_SAME_SERIES'
         ).select_related('prize_type')
+        
+        # No permitiremos ganar múltiples aproximaciones de la misma serie
+        # Seleccionamos la de mayor valor
+        best_approx = None
+        best_amount = Decimal('0')
 
         for prize in same_series_prizes:
             match_type = self.check_approximation_match(bet, prize, same_series=True)
             if match_type:
-                approximations.append({
-                    'type': 'APPROX_SAME_SERIES',
-                    'name': prize.name or prize.prize_type.name,
-                    'amount': str(self.calculate_prize_amount(bet, prize)),
-                    'match_type': match_type,
-                    'details': {
-                        'matched_positions': self.get_matched_positions(bet.number, self.winning_number),
-                        'series': bet.series
+                amount = self.calculate_prize_amount(bet, prize)
+                if amount > best_amount:
+                    best_amount = amount
+                    best_approx = {
+                        'type': 'APPROX_SAME_SERIES',
+                        'name': prize.name or prize.prize_type.name,
+                        'amount': str(amount),
+                        'match_type': match_type,
+                        'details': {
+                            'matched_positions': self.get_matched_positions(bet.number, self.winning_number),
+                            'series': bet.series
+                        }
                     }
-                })
+
+        if best_approx:
+            approximations.append(best_approx)
 
         return approximations
 
@@ -195,20 +335,31 @@ class LotteryWinnerService:
         diff_series_prizes = self.prize_plan.prizes.filter(
             prize_type__code='APPROX_DIFF_SERIES'
         ).select_related('prize_type')
+        
+        # No permitiremos ganar múltiples aproximaciones de diferente serie
+        # Seleccionamos la de mayor valor
+        best_approx = None
+        best_amount = Decimal('0')
 
         for prize in diff_series_prizes:
             match_type = self.check_approximation_match(bet, prize, same_series=False)
             if match_type:
-                approximations.append({
-                    'type': 'APPROX_DIFF_SERIES',
-                    'name': prize.name or prize.prize_type.name,
-                    'amount': str(self.calculate_prize_amount(bet, prize)),
-                    'match_type': match_type,
-                    'details': {
-                        'matched_positions': self.get_matched_positions(bet.number, self.winning_number),
-                        'series': bet.series
+                amount = self.calculate_prize_amount(bet, prize)
+                if amount > best_amount:
+                    best_amount = amount
+                    best_approx = {
+                        'type': 'APPROX_DIFF_SERIES',
+                        'name': prize.name or prize.prize_type.name,
+                        'amount': str(amount),
+                        'match_type': match_type,
+                        'details': {
+                            'matched_positions': self.get_matched_positions(bet.number, self.winning_number),
+                            'series': bet.series
+                        }
                     }
-                })
+
+        if best_approx:
+            approximations.append(best_approx)
 
         return approximations
 
@@ -283,12 +434,18 @@ class LotteryWinnerService:
             return sorted(bet.number) == sorted(self.winning_number)
         
         elif prize_type.code == 'ANTERIOR':
-            anterior = str(int(self.winning_number) - 1).zfill(4)
-            return bet.number == anterior
+            try:
+                anterior = str(int(self.winning_number) - 1).zfill(4)
+                return bet.number == anterior
+            except ValueError:
+                return False
         
         elif prize_type.code == 'POSTERIOR':
-            posterior = str(int(self.winning_number) + 1).zfill(4)
-            return bet.number == posterior
+            try:
+                posterior = str(int(self.winning_number) + 1).zfill(4)
+                return bet.number == posterior
+            except ValueError:
+                return False
         
         elif prize_type.code == 'SERIES':
             return bet.series == self.winning_series
@@ -310,50 +467,73 @@ class LotteryWinnerService:
         return False
 
     def calculate_prize_amount(self, bet: 'Bet', prize: 'Prize') -> Decimal:
+        """
+        Calcula el monto de premio que corresponde a una apuesta según las fracciones
+        """
         try:
-            # Validar que los valores no sean None o 0
-            if not bet.amount or not self.lottery.fraction_price or not prize.fraction_amount:
-                logger.error(f"Valores inválidos para cálculo de premio: amount={bet.amount}, "
-                            f"fraction_price={self.lottery.fraction_price}, "
-                            f"fraction_amount={prize.fraction_amount}")
+            # Validar que los valores sean números y no estén vacíos
+            bet_amount = bet.amount or Decimal('0')
+            fraction_price = self.lottery.fraction_price or Decimal('1')
+            prize_amount = prize.amount or Decimal('0')
+            
+            if fraction_price == 0:
+                logger.error(f"Precio de fracción es 0 para lotería {self.lottery.name}, no se puede calcular premio")
                 return Decimal('0')
+            
+            # 1. Calcular cuántas fracciones compró el apostador
+            fractions_bought = bet.fractions if hasattr(bet, 'fractions') and bet.fractions > 0 else Decimal(bet_amount / fraction_price)
+            
+            # 2. Si la apuesta es por todas las fracciones, paga el premio completo
+            if fractions_bought >= self.lottery.fraction_count:
+                logger.info(f"Apuesta por billete completo: {fractions_bought} fracciones. Premio completo: {prize_amount}")
+                return prize_amount
+            
+            # 3. Si es fracción, calcular la parte proporcional usando el fraction_amount pre-calculado
+            if prize.fraction_amount:
+                prize_per_fraction = prize.fraction_amount
+            else:
+                # Si no tiene fraction_amount, dividir entre total de fracciones
+                prize_per_fraction = prize_amount / self.lottery.fraction_count
                 
-            # Validar que fraction_price no sea 0
-            if self.lottery.fraction_price == 0:
-                logger.error("Precio de fracción es 0, no se puede calcular el premio")
-                return Decimal('0')
-
-            fraction_ratio = Decimal(str(bet.amount)) / Decimal(str(self.lottery.fraction_price))
-            prize_amount = Decimal(str(prize.fraction_amount)) * fraction_ratio
+            total_prize = prize_per_fraction * fractions_bought
             
-            logger.info(f"Cálculo de premio: {bet.amount} / {self.lottery.fraction_price} = {fraction_ratio} * "
-                    f"{prize.fraction_amount} = {prize_amount}")
+            # Registro para auditoría
+            logger.info(
+                f"Cálculo de premio: {fractions_bought} fracciones x {prize_per_fraction}/fracción = {total_prize} " +
+                f"(Premio total: {prize_amount}, Fracciones totales: {self.lottery.fraction_count})"
+            )
             
-            return prize_amount
-            
+            return total_prize
+                
         except (TypeError, ValueError, ZeroDivisionError) as e:
-            logger.error(f"Error calculando premio para apuesta {bet.id}: {str(e)}")
+            logger.error(
+                f"Error calculando premio para apuesta {bet.id}: {str(e)} - " +
+                f"Amount: {bet_amount}, Fraction Price: {fraction_price}, Prize Amount: {prize_amount}"
+            )
             return Decimal('0')
 
     def get_matched_positions(self, number1: str, number2: str) -> List[int]:
         """Obtiene las posiciones coincidentes entre dos números"""
-        return [i for i in range(len(number1)) if number1[i] == number2[i]]
+        return [i for i in range(len(number1)) if i < len(number2) and number1[i] == number2[i]]
 
     def get_match_description(self, positions: List[int]) -> str:
         """Genera descripción del tipo de coincidencia"""
-        if positions == [0, 1, 2]:
-            return 'Tres Primeras'
-        elif positions == [-3, -2, -1]:
-            return 'Tres Últimas'
-        elif positions == [0, 1]:
-            return 'Dos Primeras'
-        elif positions == [-2, -1]:
-            return 'Dos Últimas'
-        elif positions == [1, 2]:
-            return 'Dos del Centro'
-        elif positions == [-1]:
-            return 'Última'
-        return 'Coincidencia Parcial'
+        # Patrones comunes de coincidencia
+        patterns = {
+            (0, 1, 2): 'Tres Primeras',
+            (1, 2, 3): 'Tres Últimas',
+            (0, 1): 'Dos Primeras',
+            (2, 3): 'Dos Últimas',
+            (1, 2): 'Dos del Centro',
+            (3,): 'Última',
+            (0,): 'Primera',
+            (0, 1, 3): 'Dos Primeras y Última',
+            (0, 2, 3): 'Primera y Dos Últimas'
+        }
+        
+        # Convertir posiciones a tupla para búsqueda en diccionario
+        pos_tuple = tuple(sorted(positions))
+        return patterns.get(pos_tuple, 'Coincidencia Parcial')
 
     def get_special_prize_details(self, bet: 'Bet', prize: 'Prize') -> Dict:
         """Obtiene detalles específicos para premios especiales"""
