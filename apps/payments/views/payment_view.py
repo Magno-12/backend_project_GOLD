@@ -343,6 +343,7 @@ class PaymentViewSet(GenericViewSet):
             serializer.is_valid(raise_exception=True)
 
             amount = serializer.validated_data['amount']
+            use_keys = serializer.validated_data.get('use_keys', False)
 
             # Validar monto mínimo
             if amount < 50000:
@@ -388,6 +389,7 @@ class PaymentViewSet(GenericViewSet):
                     account_type=serializer.validated_data['account_type'],
                     account_number=serializer.validated_data['account_number'],
                     destination_account=destination_account,
+                    use_keys=use_keys,  # Nuevo campo para indicar si se usa sistema de llaves
                     status='PENDING'
                 )
 
@@ -402,6 +404,7 @@ class PaymentViewSet(GenericViewSet):
                     'amount': str(amount),
                     'expiration_date': withdrawal.expiration_date,
                     'status': 'PENDING',
+                    'use_keys': use_keys,  # Incluir en la respuesta si se usa sistema de llaves
                     'new_balance': str(balance.balance)
                 }
             }, status=status.HTTP_201_CREATED)
@@ -411,6 +414,7 @@ class PaymentViewSet(GenericViewSet):
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
 
     @action(detail=False, methods=['get'])
     def withdrawal_history(self, request):
@@ -524,7 +528,8 @@ class PaymentViewSet(GenericViewSet):
                     **serializer.data,
                     'status_display': withdrawal.get_status_display(),
                     'bank_display': withdrawal.get_bank_display(),
-                    'account_type_display': withdrawal.get_account_type_display()
+                    'account_type_display': withdrawal.get_account_type_display(),
+                    'use_keys': withdrawal.use_keys  # Incluir el campo de sistema de llaves
                 },
                 'timing_info': {
                     'created_at': withdrawal.created_at,

@@ -105,6 +105,13 @@ class PrizeWithdrawal(BaseModel):
         'Número de cuenta',
         max_length=30
     )
+    
+    # Nuevo campo: Utilizar llaves para pago
+    use_keys = models.BooleanField(
+        'Utilizar llaves para pago',
+        default=False,
+        help_text='Indica si se utilizará el sistema de llaves para realizar el pago'
+    )
 
     # Estado y fechas
     status = models.CharField(

@@ -81,7 +81,7 @@ class PrizeWithdrawalSerializer(serializers.ModelSerializer):
             'id', 'user', 'user_name', 'amount', 'withdrawal_code',
             'status', 'status_display', 'bank', 'bank_display', 
             'account_type', 'account_type_display', 'account_number', 
-            'created_at', 'expiration_date', 'processed_date'
+            'use_keys', 'created_at', 'expiration_date', 'processed_date'
         ]
         read_only_fields = [
             'withdrawal_code', 'status', 'expiration_date', 

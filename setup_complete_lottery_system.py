@@ -59,10 +59,17 @@ def setup_complete_lottery_system():
 def cleanup_existing_data():
     """Limpia todos los datos existentes del sistema"""
     print("Limpiando datos existentes...")
-    PrizeType.objects.all().delete()
-    Lottery.objects.all().delete()
-    PrizePlan.objects.all().delete()
-    Prize.objects.all().delete()
+    from django.db import transaction
+    
+    with transaction.atomic():
+        # Primero elimina los premios
+        Prize.objects.all().delete()
+        # Luego los planes de premios
+        PrizePlan.objects.all().delete()
+        # Luego las loterías
+        Lottery.objects.all().delete()
+        # Finalmente los tipos de premios
+        PrizeType.objects.all().delete()
 
 
 def create_base_prize_types():
@@ -200,7 +207,12 @@ def configurar_bogota(prize_types):
         major_prize_amount=Decimal('14000000000'),
         min_bet_amount=Decimal('6000'),
         max_bet_amount=Decimal('14000000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     # Crear plan de premios
@@ -297,7 +309,12 @@ def configurar_boyaca(prize_types):
         major_prize_amount=Decimal('15000000000'),
         min_bet_amount=Decimal('5000'),
         max_bet_amount=Decimal('15000000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     boyaca_plan = PrizePlan.objects.create(
@@ -401,17 +418,22 @@ def configurar_cauca(prize_types):
         draw_time=time(22, 30),
         fraction_count=4,
         fraction_price=Decimal('4000'),
-        major_prize_amount=Decimal('5555000000'),
+        major_prize_amount=Decimal('8000000000'),
         min_bet_amount=Decimal('4000'),
-        max_bet_amount=Decimal('5555000000'),
-        is_active=True
+        max_bet_amount=Decimal('8000000000'),
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     cauca_plan = PrizePlan.objects.create(
         lottery=cauca,
-        name='Plan de Premios 2023',
-        start_date='2023-07-08',
-        sorteo_number='2462',
+        name='Plan de Premios 2024',
+        start_date='2024-01-01',
+        sorteo_number='2500',
         is_active=True
     )
 
@@ -419,21 +441,22 @@ def configurar_cauca(prize_types):
     Prize.objects.create(
         prize_plan=cauca_plan,
         prize_type=prize_types['MAJOR'],
-        amount=Decimal('5555000000'),
-        fraction_amount=Decimal('922130000'),
+        amount=Decimal('8000000000'),
+        fraction_amount=Decimal('1328000000'),
         quantity=1,
         order=1
     )
 
     # Secos
     premios_secos_cauca = [
-        ('Primer seco', Decimal('200000000'), Decimal('33200000'), 1),
-        ('Segundo seco', Decimal('100000000'), Decimal('16600000'), 1),
+        ('Premio seco', Decimal('300000000'), Decimal('49800000'), 1),
+        ('Segundo seco', Decimal('200000000'), Decimal('33200000'), 1),
         ('Tercer seco', Decimal('100000000'), Decimal('16600000'), 1),
-        ('Cuarto seco', Decimal('50000000'), Decimal('8300000'), 1),
+        ('Cuarto seco', Decimal('100000000'), Decimal('16600000'), 1),
         ('Quinto seco', Decimal('50000000'), Decimal('8300000'), 1),
         ('Sexto seco', Decimal('50000000'), Decimal('8300000'), 1),
-        ('Secos 10 millones', Decimal('10000000'), Decimal('1660000'), 27)
+        ('Séptimo seco', Decimal('50000000'), Decimal('8300000'), 1),
+        ('Secos 8 al 36', Decimal('10000000'), Decimal('1660000'), 29)
     ]
 
     for idx, (name, amount, fraction_amount, qty) in enumerate(premios_secos_cauca, 2):
@@ -447,17 +470,17 @@ def configurar_cauca(prize_types):
             order=idx
         )
 
-    # Aproximación al mayor con serie
+    # Aproximaciones al mayor con serie
     aprox_serie_cauca = [
-        ('En cualquier orden', Decimal('3313253'), 23),
+        ('Mayor en cualquier orden', Decimal('3855424'), 23),
         ('Serie', Decimal('19277'), 8893),
         ('Última', Decimal('38554'), 887),
-        ('Dos últimas', Decimal('361446'), 80),
-        ('Dos primeras', Decimal('361446'), 80),
-        ('Tres primeras', Decimal('7228916'), 9),
-        ('Tres últimas', Decimal('7228916'), 9),
-        ('Primera y dos últimas', Decimal('7228916'), 9),
-        ('Dos primeras y última', Decimal('7228916'), 9)
+        ('Dos últimas', Decimal('419279'), 80),
+        ('Dos primeras', Decimal('419279'), 80),
+        ('Tres primeras', Decimal('7710845'), 9),
+        ('Tres últimas', Decimal('7710845'), 9),
+        ('Primera y dos últimas', Decimal('7710845'), 9),
+        ('Dos primeras y última', Decimal('7710845'), 9)
     ]
 
     for name, amount, qty in aprox_serie_cauca:
@@ -470,17 +493,17 @@ def configurar_cauca(prize_types):
             quantity=qty
         )
 
-    # Aproximaciones al mayor diferente
+    # Aproximaciones al mayor en diferente serie
     aprox_diff_cauca = [
-        ('Última cifra', Decimal('19277'), 195129),
-        ('Dos últimas', Decimal('28916'), 17739),
-        ('Dos primeras', Decimal('28916'), 17739),
-        ('Tres primeras', Decimal('57831'), 1971),
-        ('Tres últimas', Decimal('57831'), 1971),
-        ('Dos primeras y última', Decimal('57831'), 1971),
-        ('Primeras y dos últimas', Decimal('57831'), 1971),
-        ('Cuatro cifras', Decimal('7228916'), 219),
-        ('Secos en diferente serie', Decimal('38554'), 7227)
+        ('Última', Decimal('19277'), 275319),
+        ('Dos últimas', Decimal('28916'), 25029),
+        ('Dos primeras', Decimal('28916'), 25029),
+        ('Tres primeras', Decimal('57831'), 2781),
+        ('Tres últimas', Decimal('57831'), 2781),
+        ('Dos primeras y última', Decimal('57831'), 2781),
+        ('Primera y dos últimas', Decimal('57831'), 2781),
+        ('Extra chance patojo', Decimal('7228916'), 309),
+        ('Secos en diferente serie', Decimal('38554'), 11124)
     ]
 
     for name, amount, qty in aprox_diff_cauca:
@@ -507,7 +530,12 @@ def configurar_cruz_roja(prize_types):
         major_prize_amount=Decimal('7000000000'),
         min_bet_amount=Decimal('5000'),
         max_bet_amount=Decimal('7000000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     cruz_roja_plan = PrizePlan.objects.create(
@@ -613,7 +641,12 @@ def configurar_cundinamarca(prize_types):
         major_prize_amount=Decimal('6000000000'),
         min_bet_amount=Decimal('5000'),
         max_bet_amount=Decimal('6000000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     cundinamarca_plan = PrizePlan.objects.create(
@@ -713,7 +746,12 @@ def configurar_huila(prize_types):
         major_prize_amount=Decimal('2000000000'),
         min_bet_amount=Decimal('4000'),
         max_bet_amount=Decimal('2000000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     huila_plan = PrizePlan.objects.create(
@@ -804,7 +842,12 @@ def configurar_risaralda(prize_types):
         major_prize_amount=Decimal('1400000000'),
         min_bet_amount=Decimal('3000'),
         max_bet_amount=Decimal('1400000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     risaralda_plan = PrizePlan.objects.create(
@@ -935,7 +978,12 @@ def configurar_manizales(prize_types):
         major_prize_amount=Decimal('2200000000'),
         min_bet_amount=Decimal('2000'),
         max_bet_amount=Decimal('2200000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     manizales_plan = PrizePlan.objects.create(
@@ -1044,7 +1092,12 @@ def configurar_medellin(prize_types):
         major_prize_amount=Decimal('15000000000'),
         min_bet_amount=Decimal('7000'),
         max_bet_amount=Decimal('15000000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     medellin_plan = PrizePlan.objects.create(
@@ -1141,7 +1194,12 @@ def configurar_meta(prize_types):
         major_prize_amount=Decimal('1500000000'),
         min_bet_amount=Decimal('3000'),
         max_bet_amount=Decimal('1500000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     meta_plan = PrizePlan.objects.create(
@@ -1241,7 +1299,12 @@ def configurar_quindio(prize_types):
         major_prize_amount=Decimal('1800000000'),
         min_bet_amount=Decimal('2000'),
         max_bet_amount=Decimal('1800000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     quindio_plan = PrizePlan.objects.create(
@@ -1345,7 +1408,12 @@ def configurar_santander(prize_types):
         major_prize_amount=Decimal('10000000000'),
         min_bet_amount=Decimal('6000'),
         max_bet_amount=Decimal('10000000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     santander_plan = PrizePlan.objects.create(
@@ -1444,7 +1512,12 @@ def configurar_tolima(prize_types):
         major_prize_amount=Decimal('3000000000'),
         min_bet_amount=Decimal('4000'),
         max_bet_amount=Decimal('3000000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     tolima_plan = PrizePlan.objects.create(
@@ -1539,7 +1612,12 @@ def configurar_valle(prize_types):
         major_prize_amount=Decimal('6000000000'),
         min_bet_amount=Decimal('5000'),
         max_bet_amount=Decimal('6000000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     valle_plan = PrizePlan.objects.create(
@@ -1644,7 +1722,12 @@ def configurar_extra_colombia(prize_types):
         major_prize_amount=Decimal('12000000000'),
         min_bet_amount=Decimal('16000'),
         max_bet_amount=Decimal('12000000000'),
-        is_active=True
+        is_active=True,
+        # Añade estos campos requeridos:
+        max_fractions_per_bet=3,  # Igual que fraction_count
+        number_range_start='0000',
+        number_range_end='9999',
+        closing_time=time(20, 0)
     )
 
     extra_plan = PrizePlan.objects.create(
