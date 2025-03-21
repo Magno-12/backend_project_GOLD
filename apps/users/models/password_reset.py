@@ -8,8 +8,8 @@ from datetime import timedelta
 from apps.default.models.base_model import BaseModel
 
 def generate_verification_code():
-    """Genera un código alfanumérico de 8 caracteres"""
-    chars = string.ascii_letters + string.digits
+    """Genera un código alfanumérico de 8 caracteres en mayúsculas"""
+    chars = string.ascii_uppercase + string.digits  # Solo letras mayúsculas y dígitos
     return ''.join(random.choice(chars) for _ in range(8))
 
 

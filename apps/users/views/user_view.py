@@ -256,7 +256,7 @@ class UserViewSet(viewsets.GenericViewSet):
             
             Has solicitado un código para cambiar tu contraseña.
             
-            Tu código de verificación es: {reset_code.code}
+            Tu código de verificación es: {reset_code.code.upper()}
             
             Este código expirará en 5 minutos.
             
