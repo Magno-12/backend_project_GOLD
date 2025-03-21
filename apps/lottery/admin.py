@@ -222,19 +222,30 @@ class LotteryAdmin(admin.ModelAdmin):
             # Encabezado
             content.append("VENTA06")  # Código de lotería
             content.append("0993")     # Código distribuidor
-            content.append(f"{lottery.last_draw_number + 1:04d}")  # Número sorteo
-            content.append(f"{len(sold_bets):07d}")  # Total ventas
+            content.append(f"{lottery.last_draw_number + 1:04d}")  # Número sorteo (formato: 4 dígitos)
+            content.append(f"{len(sold_bets):07d}")  # Total ventas (formato: 7 dígitos)
 
             # Detalle de ventas
             for bet in sold_bets:
+                # Asegurar que tenemos enteros para conversiones
+                number = int(bet.number) if isinstance(bet.number, str) and bet.number.isdigit() else 0
+                series = int(bet.series) if isinstance(bet.series, str) and bet.series.isdigit() else 0
+                
+                # Calcular fracciones
+                fractions = int(bet.amount/lottery.fraction_price)
+                
+                # Convertir UUID a string y formatear para el campo de consecutivo
+                # Eliminamos guiones y tomamos solo los primeros 10 caracteres
+                bet_id_str = str(bet.id).replace('-', '')[:10]
+                
                 line = (
-                    f"{bet.number:04d}"           # Número
-                    f"{bet.series:03d}"           # Serie
-                    f"{int(bet.amount/lottery.fraction_price):03d}"  # Fracciones
-                    f"19"                         # Código departamento
-                    f"{'BBC':>5}"                 # Serie tiquete
-                    f"{bet.id:0>10}"              # Consecutivo
-                    f"GOLD{bet.id:014}"           # Código seguridad
+                    f"{number:04d}"           # Número (formato: 4 dígitos)
+                    f"{series:03d}"           # Serie (formato: 3 dígitos)
+                    f"{fractions:03d}"        # Fracciones (formato: 3 dígitos)
+                    f"19"                     # Código departamento
+                    f"{'BBC':>5}"             # Serie tiquete (justificado a derecha, 5 caracteres)
+                    f"{bet_id_str:0>10}"      # Consecutivo (10 dígitos, rellenado con ceros)
+                    f"GOLD{bet_id_str[:14]}"  # Código seguridad (fijo + hasta 14 caracteres del ID)
                 )
                 content.append(line)
 
@@ -249,6 +260,8 @@ class LotteryAdmin(admin.ModelAdmin):
 
         except Exception as e:
             self.message_user(request, f'Error: {str(e)}', level=messages.ERROR)
+            import traceback
+            self.message_user(request, f'Detalles: {traceback.format_exc()}', level=messages.ERROR)
 
     generate_sales_file.short_description = "Generar archivo de ventas"
 
@@ -264,7 +277,7 @@ class LotteryAdmin(admin.ModelAdmin):
             # Encabezado según formato
             content.append("06")  # Código lotería
             content.append("0993") # Código distribuidor Coinjuegos
-            content.append(f"{str(lottery.last_draw_number + 1):0>4}") # Aseguramos 4 dígitos
+            content.append(f"{lottery.last_draw_number + 1:04d}") # Aseguramos 4 dígitos
             
             # Obtener billetes no vendidos
             unsold_tickets = lottery.bets.filter(
@@ -277,16 +290,20 @@ class LotteryAdmin(admin.ModelAdmin):
                 int(ticket.amount/lottery.fraction_price) 
                 for ticket in unsold_tickets
             )
-            content.append(f"{total_fractions:0>7}") # Aseguramos 7 dígitos
+            content.append(f"{total_fractions:07d}") # Aseguramos 7 dígitos
 
             # Detalle de billetes
             for ticket in unsold_tickets:
+                # Asegurar que tenemos enteros para conversiones
+                number = int(ticket.number) if isinstance(ticket.number, str) and ticket.number.isdigit() else 0
+                series = int(ticket.series) if isinstance(ticket.series, str) and ticket.series.isdigit() else 0
+                
                 fractions = int(ticket.amount/lottery.fraction_price)
                 line = (
-                    f"{ticket.number:0>4}"     # NNNN
-                    f"{ticket.series:0>3}"     # SSS
-                    f"{fractions:0>3}"         # FFF
-                    f"{fractions:0>2}"         # ##
+                    f"{number:04d}"     # NNNN - aseguramos 4 dígitos
+                    f"{series:03d}"     # SSS - aseguramos 3 dígitos
+                    f"{fractions:03d}"         # FFF
+                    f"{fractions:02d}"         # ##
                     f"001"                     # QQQ
                     f"01"                      # PP
                 )
@@ -303,6 +320,8 @@ class LotteryAdmin(admin.ModelAdmin):
 
         except Exception as e:
             self.message_user(request, f'Error: {str(e)}', level=messages.ERROR)
+            import traceback
+            self.message_user(request, f'Detalles: {traceback.format_exc()}', level=messages.ERROR)
 
     generate_unsold_file.short_description = "Generar archivo no vendidos"
 
@@ -346,11 +365,18 @@ class LotteryAdmin(admin.ModelAdmin):
 
             # Detalle billetes vendidos
             for bet in sold_tickets:
+                # Asegurar que tenemos enteros para conversiones
+                number = int(bet.number) if isinstance(bet.number, str) and bet.number.isdigit() else 0
+                series = int(bet.series) if isinstance(bet.series, str) and bet.series.isdigit() else 0
+                
+                fractions = int(bet.amount/lottery.fraction_price)
+                bet_id_str = str(bet.id).replace('-', '')[:10]
+                
                 line = (
-                    f"{bet.number:04d}{bet.series:03d}"
-                    f"{int(bet.amount/lottery.fraction_price):03d}19"
-                    f"{'BBC'}{bet.id:0>10}"
-                    f"GOLD{bet.id:014}"
+                    f"{number:04d}{series:03d}"  # Número y serie
+                    f"{fractions:03d}19"         # Fracciones y código departamento
+                    f"{'BBC'}{bet_id_str:0>10}"  # Serie tiquete y consecutivo
+                    f"GOLD{bet_id_str[:14]}"     # Código seguridad
                 )
                 content.append(line)
 
@@ -369,6 +395,8 @@ class LotteryAdmin(admin.ModelAdmin):
                 f'Error generando archivo tipo 204: {str(e)}',
                 level=messages.ERROR
             )
+            import traceback
+            self.message_user(request, f'Detalles: {traceback.format_exc()}', level=messages.ERROR)
 
     generate_type_204_report.short_description = "Generar reporte tipo 204"
 
